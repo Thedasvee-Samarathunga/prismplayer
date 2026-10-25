@@ -2,6 +2,8 @@
 import { api } from './api.js';
 import { S, saveSettings, emit, loadLibrary } from './state.js';
 import { engine } from './player.js';
+import { styleOf } from './theme.js';
+import { ACTIONS, resolveBindings, eventToCombo, validate, assign, pretty, defaultBindings, globalList } from './hotkeys.js';
 import { escapeHtml } from './fmt.js';
 import { ICON } from './icons.js';
 
@@ -15,7 +17,10 @@ export function toast(msg, { error = false, ms = 5000 } = {}) {
   el.className = 'toast' + (error ? ' err' : '');
   el.textContent = msg;
   host.appendChild(el);
-  setTimeout(() => { el.style.transition = 'opacity .3s'; el.style.opacity = '0'; setTimeout(() => el.remove(), 320); }, ms);
+  let done = false;
+  const close = () => { if (done) return; done = true; el.style.transition = 'opacity .3s'; el.style.opacity = '0'; setTimeout(() => el.remove(), 320); };
+  setTimeout(close, ms);
+  return { close, el };
 }
 
 // ------------------------------------------------------------------------------------ modal
@@ -168,16 +173,17 @@ export function browseDialog({ mode = 'folder', title = 'Browse' } = {}) {
 }
 
 // ------------------------------------------------------------------------------------ settings
-export function settingsDialog({ onFoldersChanged } = {}) {
+export function settingsDialog({ onFoldersChanged, tab: startTab } = {}) {
   const wrap = document.createElement('div');
   const tabsHost = document.createElement('div');
   tabsHost.className = 'tabs-inline';
   const pane = document.createElement('div');
   wrap.append(tabsHost, pane);
-  const TABS = ['Library', 'Output', 'Playback', 'Lyrics', 'Scrobbling'];
-  let tab = 'Library', pollTimer = 0;
+  const TABS = ['Library', 'Output', 'Playback', 'Appearance', 'Hotkeys', 'Lyrics', 'Cache', 'Scrobbling'];
+  let tab = TABS.includes(startTab) ? startTab : 'Library', pollTimer = 0;
+  const onCloseHooks = [];
 
-  const mod = modal({ title: 'Settings', body: wrap, width: '700px', buttons: [{ label: 'Close', primary: true }], onClose: () => clearInterval(pollTimer) });
+  const mod = modal({ title: 'Settings', body: wrap, width: '700px', buttons: [{ label: 'Close', primary: true }], onClose: () => { clearInterval(pollTimer); onCloseHooks.splice(0).forEach((f) => f()); } });
   mod.body.style.padding = '0';
   pane.style.padding = '8px 20px 16px';
 
@@ -195,9 +201,13 @@ export function settingsDialog({ onFoldersChanged } = {}) {
 
   async function drawPane() {
     clearInterval(pollTimer);
+    onCloseHooks.splice(0).forEach((f) => f());
     if (tab === 'Library') return libraryPane();
     if (tab === 'Output') return outputPane();
+    if (tab === 'Appearance') return appearancePane();
+    if (tab === 'Hotkeys') return hotkeysPane();
     if (tab === 'Lyrics') return lyricsPane();
+    if (tab === 'Cache') return cachePane();
     if (tab === 'Scrobbling') return scrobblePane();
     return playbackPane();
   }
@@ -298,6 +308,131 @@ export function settingsDialog({ onFoldersChanged } = {}) {
     info(); pollTimer = setInterval(info, 1500);
   }
 
+  // ---- appearance
+  function appearancePane() {
+    const cur = styleOf(S.settings);
+    pane.innerHTML = `
+      <p class="note">Colours always come from the album that is playing. There is no colour picker and there are no themes to choose from.</p>
+      <div class="field"><span class="lab">Colours</span></div>
+      <div class="choice-row" role="radiogroup" aria-label="Colours">
+        <label class="choice"><input type="radio" name="ap-colors" value="standard"><div class="swatch"><i style="background:var(--shade1)"></i><i style="background:var(--accent)"></i></div><b>Album colours</b><span>Calm, dark, tinted with the cover's main colours.</span></label>
+        <label class="choice"><input type="radio" name="ap-colors" value="vivid"><div class="swatch"><i style="background:var(--shade1)"></i><i style="background:var(--shade2)"></i><i style="background:var(--shade3)"></i><i style="background:var(--shade4)"></i></div><b>Album colours: vivid</b><span>More shades from the cover, brighter and stronger everywhere.</span></label>
+        <label class="choice"><input type="radio" name="ap-colors" value="mono"><div class="swatch"><i style="background:#000"></i><i style="background:#3a3a3a"></i><i style="background:#fff"></i></div><b>Black and white</b><span>Flat black, white and grey. Ignores the cover.</span></label>
+      </div>
+      <div class="field" style="margin-top:20px"><span class="lab">Look</span></div>
+      <div class="choice-row two" role="radiogroup" aria-label="Look" id="ap-looks">
+        <label class="choice"><input type="radio" name="ap-look" value="flat"><b>Flat</b><span>Solid dark panels.</span></label>
+        <label class="choice"><input type="radio" name="ap-look" value="frost"><b>Frosted pastel</b><span>Light, soft-coloured glass that blurs the album art behind it.</span></label>
+      </div>
+      <p class="note" id="ap-note"></p>
+      <p class="note">Text is always kept readable: every colour is checked against the glass and the blurred cover behind it.</p>`;
+    const q = (s) => pane.querySelector(s);
+    const paint = () => {
+      const st = styleOf(S.settings);
+      pane.querySelectorAll('input[name=ap-colors]').forEach((r) => { r.checked = r.value === st.colors; });
+      pane.querySelectorAll('input[name=ap-look]').forEach((r) => { r.checked = r.value === st.look; });
+      q('#ap-looks').querySelectorAll('.choice').forEach((c) => c.classList.toggle('disabled', st.colors === 'mono'));
+      q('#ap-note').textContent = st.colors === 'mono' ? 'Black and white is always flat.' : '';
+    };
+    paint();
+    pane.querySelectorAll('input[name=ap-colors]').forEach((r) => r.addEventListener('change', async () => {
+      await saveSettings({ appearance: { colors: r.value }, dynamicColors: r.value !== 'mono' }); paint();
+    }));
+    pane.querySelectorAll('input[name=ap-look]').forEach((r) => r.addEventListener('change', async () => { await saveSettings({ appearance: { look: r.value } }); paint(); }));
+  }
+
+  // ---- cache
+  function cachePane() {
+    const c = S.settings.cache || {};
+    pane.innerHTML = `
+      <p class="note">Prism remembers things so they load faster, especially from hard disks and for big files:</p>
+      <ul class="note" style="margin:6px 0 6px 18px;padding:0;line-height:1.7">
+        <li><b>Track starts:</b> the first seconds of the tracks coming up next are decoded in advance and kept. When the track plays, sound starts at once while the file finishes opening. Only slow-to-open tracks (big files, slow disks, DSD) are kept.</li>
+        <li><b>Cover art and colours</b> are saved, so albums and themes appear instantly after a restart.</li>
+        <li>The start of the next tracks is also read into the system's file cache.</li>
+      </ul>
+      <label class="check" style="margin-top:12px"><input type="checkbox" id="ca-pre"> Prepare upcoming tracks in advance</label>
+      <div class="field"><label for="ca-head">Track-start cache limit (MB)</label><input id="ca-head" type="text" inputmode="numeric"></div>
+      <div class="field"><label for="ca-cov">Cover-art cache limit (MB)</label><input id="ca-cov" type="text" inputmode="numeric"></div>
+      <div id="ca-stats" class="status-pill"><i></i><span>Reading cache size…</span></div>
+      <div style="display:flex;gap:10px;margin-top:8px;flex-wrap:wrap"><button class="btn" id="ca-clear" type="button">Clear the cache</button></div>
+      <p class="note">The cache only holds copies. Clearing it never touches your music or your library.</p>`;
+    const q = (x) => pane.querySelector(x);
+    q('#ca-pre').checked = c.prefetch !== false; q('#ca-head').value = String(c.maxHeadMB || 1024); q('#ca-cov').value = String(c.maxCoverMB || 256);
+    const mb = (b) => (b >= 1048576 * 1024 ? (b / 1073741824).toFixed(2) + ' GB' : (b / 1048576).toFixed(b < 10485760 ? 1 : 0) + ' MB');
+    const save = () => saveSettings({ cache: { prefetch: q('#ca-pre').checked, maxHeadMB: Math.max(64, Math.min(20480, parseInt(q('#ca-head').value, 10) || 1024)), maxCoverMB: Math.max(16, Math.min(4096, parseInt(q('#ca-cov').value, 10) || 256)) } });
+    ['#ca-pre', '#ca-head', '#ca-cov'].forEach((id) => q(id).addEventListener('change', save));
+    const upd = async () => {
+      try {
+        const s = await api.get('/api/cache/stats'), el = q('#ca-stats'); if (!el) return;
+        el.className = 'status-pill ok';
+        el.querySelector('span').textContent = `Track starts: ${s.heads.files} (${mb(s.heads.bytes)}) · fast starts so far: ${s.heads.hits} · covers: ${s.covers.files} (${mb(s.covers.bytes)}) · colour palettes: ${s.palettes}`;
+      } catch (_) { /* ignore */ }
+    };
+    q('#ca-clear').addEventListener('click', async () => { await api.post('/api/cache/clear', { what: 'all' }); upd(); });
+    upd(); pollTimer = setInterval(upd, 2000);
+  }
+
+  // ---- hotkeys
+  function hotkeysPane() {
+    const host = window.prismHost && window.prismHost.setGlobalHotkeys ? window.prismHost : null;
+    pane.innerHTML = `
+      <p class="note">Press <b>Change</b>, then the keys you want. A key that is already used moves to the new action. Escape, F11 and the arrow / Enter keys in lists keep their fixed jobs.</p>
+      <div class="hk-list" id="hk-list"></div>
+      <div id="hk-msg" class="note" role="status" aria-live="polite" style="min-height:20px"></div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap"><button class="btn" id="hk-reset-all" type="button">Reset all to defaults</button></div>
+      ${host ? `<label class="check" style="margin-top:18px"><input type="checkbox" id="hk-global"> Work even when Prism is not the active window (global hotkeys)</label>
+      <p class="note">Only actions marked <b>global</b> are registered, and only with Ctrl, Alt or Win in the combination (or a media key), so typing in other programs is never affected. If another program already uses a combination it cannot be registered.</p><div id="hk-gstatus" class="note"></div>` : ''}`;
+    const list = pane.querySelector('#hk-list'), msg = pane.querySelector('#hk-msg');
+    const say = (t, bad) => { msg.textContent = t || ''; msg.style.color = bad ? 'var(--fg)' : 'var(--dim)'; };
+    const bindings = () => resolveBindings(S.settings.hotkeys);
+    const persistB = (b) => saveSettings({ hotkeys: b });
+    let capturing = null;
+    const stopCapture = () => { if (!capturing) return; window.removeEventListener('keydown', capturing.fn, true); S.hotkeyCapture = false; capturing = null; };
+    function draw() {
+      const b = bindings(), def = defaultBindings();
+      list.innerHTML = '';
+      for (const a of ACTIONS) {
+        const row = document.createElement('div'); row.className = 'hk-row'; row.dataset.id = a.id;
+        row.innerHTML = `<span class="hk-name">${escapeHtml(a.label)}${a.global ? ' <em class="hk-tag">global</em>' : ''}</span><kbd class="hk-key${b[a.id] ? '' : ' none'}">${escapeHtml(pretty(b[a.id]))}</kbd><button class="btn" data-a="change" type="button">Change</button><button class="btn" data-a="clear" type="button" ${b[a.id] ? '' : 'disabled'}>Clear</button><button class="btn" data-a="reset" type="button" ${b[a.id] === def[a.id] ? 'disabled' : ''}>Reset</button>`;
+        list.appendChild(row);
+      }
+    }
+    function startCapture(id, row) {
+      stopCapture();
+      const key = row.querySelector('.hk-key'); key.textContent = 'Press the new keys…'; key.classList.add('listen');
+      S.hotkeyCapture = true;
+      const fn = (e) => {
+        e.preventDefault(); e.stopPropagation();
+        const combo = eventToCombo(e);
+        if (!combo) return;                                                // a modifier on its own: keep waiting
+        if (combo === 'Escape') { stopCapture(); draw(); say('Cancelled.'); return; }
+        const r = assign(bindings(), id, combo);
+        if (!r.ok) { say(r.reason, true); return; }                        // stay in capture mode so the user can try another combination
+        stopCapture(); persistB(r.bindings).then(() => { draw(); say(r.displaced ? `Done. “${ACTIONS.find((x) => x.id === r.displaced).label}” lost this key.` : 'Saved.'); });
+      };
+      capturing = { fn }; window.addEventListener('keydown', fn, true);
+      say('Press the key combination. Escape cancels.');
+    }
+    list.addEventListener('click', (e) => {
+      const btn = e.target.closest('button'); if (!btn) return;
+      const row = btn.closest('.hk-row'), id = row.dataset.id, b = bindings(), def = defaultBindings();
+      if (btn.dataset.a === 'change') startCapture(id, row);
+      else if (btn.dataset.a === 'clear') persistB(Object.assign({}, b, { [id]: '' })).then(() => { draw(); say('Cleared.'); });
+      else if (btn.dataset.a === 'reset') { const r = assign(b, id, def[id]); persistB(r.bindings).then(() => { draw(); say(r.displaced ? `Reset. “${ACTIONS.find((x) => x.id === r.displaced).label}” gave the key back.` : 'Reset.'); }); }
+    });
+    pane.querySelector('#hk-reset-all').addEventListener('click', () => persistB(defaultBindings()).then(() => { draw(); say('All hotkeys are back to the defaults.'); }));
+    if (host) {
+      const g = pane.querySelector('#hk-global'); g.checked = !!S.settings.hotkeyGlobal;
+      g.addEventListener('change', () => saveSettings({ hotkeyGlobal: g.checked }).then(paintG));
+      const paintG = () => { const st = S.globalHotkeyStatus, el = pane.querySelector('#hk-gstatus'); if (!el) return; el.textContent = !S.settings.hotkeyGlobal ? '' : st ? (st.failed.length ? `Could not register: ${st.failed.join(', ')} (already used by another program). ${st.ok.length} registered.` : `${st.ok.length} global hotkey${st.ok.length === 1 ? '' : 's'} registered.`) : ''; };
+      paintG(); const t = setInterval(paintG, 800); const prev = onCloseHooks.push(() => clearInterval(t));
+      void prev;
+    }
+    draw();
+    onCloseHooks.push(stopCapture);
+  }
+
   // ---- lyrics
   function lyricsPane() {
     const l = S.settings.lyrics || {};
@@ -331,10 +466,15 @@ export function settingsDialog({ onFoldersChanged } = {}) {
       <div class="field"><label for="lb-tok">User token</label><input id="lb-tok" type="password" spellcheck="false" autocomplete="off"></div>
       <div id="lb-actions" style="display:flex;gap:10px;align-items:center"></div>
       <label class="check"><input type="checkbox" id="lb-en"> Scrobble to ListenBrainz</label>
+      <div class="field" style="margin-top:22px"><span class="lab">Last.fm recap</span></div>
+      <p class="note">The <b>Recap</b> button in the top bar uses the Last.fm API key above. By default it shows the connected account; type another Last.fm user name here to look at a different profile.</p>
+      <div class="field"><label for="rc-user-s">User name (optional)</label><input id="rc-user-s" type="text" spellcheck="false" autocomplete="off"></div>
       <div id="sc-status" style="margin-top:14px"></div>`;
     const q = (s) => pane.querySelector(s);
     q('#lf-key').value = lf.apiKey || ''; q('#lf-sec').value = lf.secret || ''; q('#lf-en').checked = !!lf.enabled;
     q('#lb-tok').value = lb.token || ''; q('#lb-en').checked = !!lb.enabled;
+    q('#rc-user-s').value = (S.settings.recap && S.settings.recap.user) || '';
+    q('#rc-user-s').addEventListener('change', () => saveSettings({ recap: { user: q('#rc-user-s').value.trim() } }));
 
     const saveLf = () => saveSettings({ scrobble: { lastfm: { apiKey: q('#lf-key').value.trim(), secret: q('#lf-sec').value.trim() } } });
     q('#lf-key').addEventListener('change', saveLf); q('#lf-sec').addEventListener('change', saveLf);
@@ -403,16 +543,13 @@ export function settingsDialog({ onFoldersChanged } = {}) {
       <p class="note">Boosting quiet tracks is allowed whenever the track's peak is known, so it can never clip. Without peak information a boost is never applied. Changes apply to the next track, or immediately if you press play again.</p>
       <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><button class="btn" id="rg-scan" type="button">Scan tracks without ReplayGain</button><span class="note" id="rg-status" style="margin:0"></span></div>
       <p class="note">Scanning measures the loudness with ffmpeg and stores it in Prism's library. Your files are never modified.</p>
-      <label class="check" style="margin-top:18px"><input type="checkbox" id="dyn"> Colours follow the album art</label>
-      <p class="note">Turn this off to always use the black, white and grey theme.</p>`;
+`;
     const q = (x) => pane.querySelector(x);
     q('#rg').value = S.settings.replayGain || 'off';
     q('#rg-pre').value = String(rg.preamp || 0); q('#rg-fb').value = String(rg.fallback || 0); q('#rg-clip').checked = rg.preventClipping !== false;
     const num = (el) => { const v = parseFloat(String(el.value).replace(',', '.')); return isFinite(v) ? Math.max(-30, Math.min(30, v)) : 0; };
     const saveRg = () => saveSettings({ replayGain: q('#rg').value, rg: { preamp: num(q('#rg-pre')), fallback: num(q('#rg-fb')), preventClipping: q('#rg-clip').checked } });
     ['#rg', '#rg-pre', '#rg-fb', '#rg-clip'].forEach((id) => q(id).addEventListener('change', saveRg));
-    q('#dyn').checked = S.settings.dynamicColors !== false;
-    q('#dyn').addEventListener('change', (e) => saveSettings({ dynamicColors: e.target.checked }));
     const st = async () => {
       try {
         const r = await api.get('/api/replaygain/status'); const el = q('#rg-status'); if (!el) return;
@@ -430,15 +567,10 @@ export function settingsDialog({ onFoldersChanged } = {}) {
 
 // ------------------------------------------------------------------------------------ help
 export function shortcutsDialog() {
-  const rows = [
-    ['Space', 'Play / pause'], ['Ctrl + → / ←', 'Next / previous track'], ['Shift + → / ←', 'Seek +5 s / −5 s'],
-    ['Ctrl + ↑ / ↓', 'Volume up / down'], ['Enter', 'Play the selected item'], ['Delete', 'Remove selected tracks from the playlist'],
-    ['Ctrl + A', 'Select all tracks in the list'], ['Ctrl + F', 'Focus the library filter'], ['Ctrl + N', 'New playlist'],
-    ['L', 'Show / hide lyrics on the cover'], ['F  or  F11', 'Fullscreen lyrics (Esc to leave)'],
-    ['Ctrl + , ', 'Settings'], ['Media keys', 'Play / pause / next / previous'],
-    ['Drag over tracks', 'Highlight a range in the playlist'], ['Right-click a visualiser', 'Swap it for another one'],
-  ];
-  modal({ title: 'Keyboard shortcuts', body: `<table class="shortcuts">${rows.map(([k, d]) => `<tr><td>${escapeHtml(k)}</td><td>${escapeHtml(d)}</td></tr>`).join('')}</table>` });
+  const b = resolveBindings(S.settings && S.settings.hotkeys);
+  const rows = ACTIONS.filter((a) => b[a.id]).map((a) => [pretty(b[a.id]), a.label]);
+  rows.push(['F11', 'Fullscreen lyrics'], ['Esc', 'Leave fullscreen / close a window'], ['Enter', 'Play the selected item'], ['Delete', 'Remove selected tracks from the playlist'], ['Ctrl + A', 'Select all tracks in the list'], ['Drag over tracks', 'Highlight a range in the playlist'], ['Right-click a visualiser', 'Swap it for another one'], ['Media keys', 'Play / pause / next / previous']);
+  modal({ title: 'Keyboard shortcuts', body: `<table class="shortcuts">${rows.map(([k, d]) => `<tr><td>${escapeHtml(k)}</td><td>${escapeHtml(d)}</td></tr>`).join('')}</table><p class="note">Change them in Settings › Hotkeys.</p>` });
 }
 
 export function aboutDialog(info) {

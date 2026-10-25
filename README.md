@@ -21,6 +21,18 @@ A foobar2000-style music player whose whole interface takes its colours from the
   With no cover art (or with the option switched off) the UI is black, white and grey.
 * **Layout:** library tree (artist/album, album, artist, genre, year) with filter · playlist tabs · info panel with cover + tags + play statistics ·
   spectrum, oscilloscope, spectrogram and level meters · foobar-style status line (`FLAC | 904 kbps | 44100 Hz | stereo`) plus the active output.
+* **Last.fm recap** (the *Recap* button in the top bar, hotkey `R`): your current listening **streak** (with the longest one, a 30-day strip and a badge on the
+  button), top artists / albums / tracks for 7 days to all time, trends (per month, week, weekday, hour, year), a one-year calendar and a weekday x hour heat map,
+  weekly charts with the #1 artist of each week, genres (from the tags of your top artists), artist of the month, new artists, biggest day, longest break and more.
+  It only *reads* Last.fm (the API key from the scrobbling settings + a user name). Your history is downloaded once, then updated incrementally, and the streak and
+  trends are worked out from a small local copy, so they open instantly and work offline. Days are counted in your local time zone.
+* **Colours and looks:** *Album colours* (calm), *Album colours: vivid* (more shades from the cover, brighter and stronger, shown in the visualisers too) or *Black and white*
+  (flat). Combine them with *Flat* or *Frosted pastel* (light, translucent glass over the blurred cover). Colours always come from the album; there is no colour picker.
+  Every combination keeps text at 4.5:1 or better, checked against what can really be behind the glass.
+* **Smart caching:** the first seconds of the tracks coming up next are decoded ahead of time and kept, so big or slow-to-open files (hard disks, DSD) start at once and are
+  bit-identical to a normal decode; the start of upcoming files is also read into the system cache; covers and colour palettes are saved on disk. Settings › Cache.
+* **Customizable hotkeys** (Settings › Hotkeys): every basic function, conflict handling, reserved keys protected, optional system-wide (global) hotkeys in the desktop app.
+* **Drag songs or folders from File Explorer** onto the window to add them to the queue (at the drop line when dropped on the queue).
 * **Lyrics:** synced lyrics highlighted line by line (click a line to jump there). Sources, best first: a `.lrc` file next to the song, lyrics in the
   tags, **LRCLIB** (free open library, optional), an OpenLyrics `.xml` or `.txt` file. The *Lyrics* button blurs the cover and plays the lyrics over it;
   *Fullscreen* (key `F` / `F11`) shows the slightly blurred art with big synced lyrics. Online lookups only happen while a lyrics view is open, once per
@@ -63,6 +75,15 @@ opens the player in your browser (Edge opens it as an app window). Data is kept 
     python test/e2e.py                    # the real UI in headless Chromium: plays every fixture format, gapless hand-over, EQ, ReplayGain, settings
     python test/e2e_native.py             # the WASAPI path end to end (the helper is built with a test sink on Linux)
     python test/e2e_features.py           # lyrics, fullscreen, open folder, drag-highlight, swappable visualisers (LRCLIB is mocked)
+    python test/e2e_v13.py                # seek bar alignment, Last.fm recap (mock), colour modes x looks on real pixels, file drops, hotkeys, cache
+
+## If the installed app does not open
+
+Prism now protects itself against the usual causes of an app that opens and silently disappears: every start-up problem is written to
+`%APPDATA%\Prism\prism-error.log` and shown in a message box; a second launch brings the running copy to the front instead of vanishing; if a start never
+got a window on screen the next one runs in safe mode (hardware acceleration off) and stays that way once it works (`--enable-gpu` switches it back on);
+a crash of the graphics process restarts the app with it off. The GitHub build also starts the real installed app (`Prism.exe --smoke-test`) and keeps
+it open for 15 seconds, and uploads the log, so a launch problem shows up in the build instead of on your PC.
 
 ## What is and is not verified
 

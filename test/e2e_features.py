@@ -56,6 +56,11 @@ def ratio(a, b):
 def hex2rgb(h): return tuple(int(h[i:i + 2], 16) for i in (1, 3, 5))
 VARS = "() => Object.fromEntries(['--fg','--dim','--accent'].map(v => [v, getComputedStyle(document.documentElement).getPropertyValue(v).trim()]))"
 
+def sel_is(pg, n, timeout=2500):
+    """True once exactly n playlist rows are highlighted (polls instead of assuming a fixed delay)."""
+    try: pg.wait_for_function("(n) => document.querySelectorAll('.pl-row.sel').length === n", arg=n, timeout=timeout); return True
+    except Exception: return False
+
 def play(pg, title, wait=1.0):
     pg.evaluate("""async (t) => { const m = await import('/js/state.js'); const pb = await import('/js/playback.js');
       const tr = Array.from(m.S.tracks.values()).find(x => x.title === t); m.replacePlaylist(m.S.activeId, [tr.id]); pb.playIndex(m.S.activeId, 0); }""", title)
@@ -181,9 +186,9 @@ def run():
             check(f"   fullscreen '{title}': lyrics {w['fg']:.1f}:1 / {w['dim']:.1f}:1, title block {m['fg']:.1f}:1 {m['accent']:.1f}:1 {m['dim']:.1f}:1, time {tm['dim']:.1f}:1", min(w.values()) >= 4.5 and min(m.values()) >= 4.5 and tm['dim'] >= 4.5, f"{w} {m} {tm}")
         pg.keyboard.press("Escape"); pg.wait_for_timeout(400)
         check("Escape leaves fullscreen", pg.locator("#fs").is_hidden())
-        pg.click("#b-full"); pg.wait_for_selector("#fs:not([hidden])"); pg.click("#fs-close"); pg.wait_for_timeout(300)
+        pg.click("#b-full"); pg.wait_for_selector("#fs:not([hidden])"); pg.click("#fs-close"); pg.wait_for_function("() => !document.fullscreenElement"); pg.wait_for_timeout(200)
         check("the toolbar button and the close button toggle it too", pg.locator("#fs").is_hidden())
-        pg.keyboard.press("F11"); pg.wait_for_selector("#fs:not([hidden])"); pg.keyboard.press("F11"); pg.wait_for_timeout(300)
+        pg.keyboard.press("F11"); pg.wait_for_selector("#fs:not([hidden])"); pg.wait_for_function("() => !!document.fullscreenElement"); pg.keyboard.press("F11"); pg.wait_for_function("() => !document.fullscreenElement"); pg.wait_for_timeout(200)
         check("F11 toggles it", pg.locator("#fs").is_hidden())
 
         print("lyrics: settings, side-panel and persistence")
@@ -240,8 +245,9 @@ def run():
         pg.evaluate("""async () => { const m = await import('/js/state.js'); const ids = Array.from(m.S.tracks.values()).map(t => t.id); m.replacePlaylist(m.S.activeId, ids); for (let i = 0; i < 5; i++) m.addToPlaylist(m.S.activeId, ids); }""")
         pg.wait_for_timeout(500)
         rows = lambda: pg.locator(".pl-row")
+        row = lambda i: pg.locator(f'.pl-row[data-i="{i}"]')          # the virtual list recycles nodes: DOM order is NOT row order
         def center(i):
-            bb = rows().nth(i).bounding_box(); return bb["x"] + 200, bb["y"] + bb["height"] / 2
+            bb = row(i).bounding_box(); return bb["x"] + 200, bb["y"] + bb["height"] / 2
         x, y2 = center(2); _, y6 = center(6)
         pg.mouse.move(x, y2); pg.mouse.down(); pg.mouse.move(x + 30, (y2 + y6) / 2, steps=6)
         check("a rubber-band rectangle is drawn while dragging", pg.locator(".marquee").is_visible())
@@ -260,7 +266,7 @@ def run():
         check("dragging upwards works and replaces the old highlight", sel_idx == [4, 5, 6, 7, 8], str(sel_idx))
         # selected rows are still dragged to MOVE them
         before = pg.evaluate("window.__prism.S.playlists.find(p => p.id === window.__prism.S.activeId).items.map(i => i.id).slice(0, 12)")
-        pg.locator(".pl-row").nth(5).drag_to(pg.locator(".pl-row").nth(1), target_position={"x": 100, "y": 4}); pg.wait_for_timeout(400)
+        row(5).drag_to(row(1), target_position={"x": 100, "y": 4}); pg.wait_for_timeout(400)
         after = pg.evaluate("window.__prism.S.playlists.find(p => p.id === window.__prism.S.activeId).items.map(i => i.id).slice(0, 12)")
         check("dragging a highlighted row still moves the whole highlighted group", after != before and after[1] == before[4] and after[5] == before[8], f"{before[:6]} -> {after[:6]}")
         # auto-scroll
@@ -275,12 +281,12 @@ def run():
         # click behaviour unchanged
         pg.evaluate("document.getElementById('pl-list').scrollTop = 0"); pg.wait_for_timeout(200)
         x, y3 = center(3); pg.mouse.click(x, y3); pg.wait_for_timeout(150)
-        check("a plain click still selects just that row", pg.locator(".pl-row.sel").count() == 1)
+        ok1 = sel_is(pg, 1); check("a plain click still selects just that row", ok1, "" if ok1 else "selected rows: " + str(pg.evaluate("Array.from(document.querySelectorAll('.pl-row.sel')).map(n => +n.dataset.i)")) + " scrollTop=" + str(pg.evaluate("document.getElementById('pl-list').scrollTop")))
         pg.keyboard.down("Shift"); pg.mouse.click(x, center(6)[1]); pg.keyboard.up("Shift"); pg.wait_for_timeout(150)
-        check("shift-click still selects a range", pg.locator(".pl-row.sel").count() == 4)
+        ok2 = sel_is(pg, 4); check("shift-click still selects a range", ok2, "" if ok2 else "selected rows: " + str(pg.evaluate("Array.from(document.querySelectorAll('.pl-row.sel')).map(n => +n.dataset.i)")))
         # empty space below the rows
         pg.evaluate("""async () => { const m = await import('/js/state.js'); const pl = m.createPlaylist('Three', Array.from(m.S.tracks.values()).slice(0, 3).map(t => t.id)); }"""); pg.wait_for_timeout(400)
-        lb = pg.locator("#pl-list").bounding_box(); r2 = rows().nth(2).bounding_box()
+        lb = pg.locator("#pl-list").bounding_box(); r2 = row(2).bounding_box()
         pg.mouse.move(lb["x"] + 300, lb["y"] + lb["height"] - 40); pg.mouse.down(); pg.mouse.move(lb["x"] + 350, r2["y"] + 4, steps=8); pg.mouse.up(); pg.wait_for_timeout(200)
         check("dragging from the empty area below the list highlights the rows it touches", pg.locator(".pl-row.sel").count() >= 1 and pg.locator(".pl-row.sel").count() <= 3, str(pg.locator(".pl-row.sel").count()))
 

@@ -10,6 +10,8 @@ const BYTES_PER_FRAME = 8;            // float32 x 2 channels
 const CHUNK_BYTES = 4096 * BYTES_PER_FRAME;
 const PRELOAD_BEFORE_END_S = 6;
 const GRACE_MS = 500;
+const HEAD_SECONDS = 12;                                   // how much of a track's start the head cache keeps (see headcache.js)
+const headFrames = (rate) => Math.round(rate * HEAD_SECONDS);
 
 function decoderArgs(track, startSec, rate, extraFilters) {
   const args = ['-v', 'error', '-nostdin'];
@@ -30,6 +32,7 @@ class Decoder {
     this.rate = rate;
     this.frames = 0;
     this.stderr = '';
+    this.t0 = Date.now(); this.firstAt = 0;                 // start-up latency: spawn -> first audio
     this.proc = spawn(ff.FFMPEG, decoderArgs(track, startSec, rate), { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
     this.proc.stderr.on('data', (d) => { if (this.stderr.length < 1500) this.stderr += d; });
     this.exited = new Promise((resolve) => { this.proc.on('close', (code) => resolve(code)); this.proc.on('error', () => resolve(-1)); });
@@ -40,6 +43,7 @@ class Decoder {
   async *chunks() {
     let rest = Buffer.alloc(0);
     for await (const data of this.proc.stdout) {
+      if (!this.firstAt) this.firstAt = Date.now();
       let b = rest.length ? Buffer.concat([rest, data]) : data;
       const usable = b.length - (b.length % BYTES_PER_FRAME);
       rest = usable === b.length ? Buffer.alloc(0) : Buffer.from(b.subarray(usable));
@@ -84,24 +88,51 @@ async function* feed(opts) {
       if (!track) { yield { k: 'error', track: null, tag: spec.tag, message: 'unknown track' }; break; }
       const rate = rateFor(track);
       // reuse the preloaded decoder when it is the one we need
-      if (pre && pre.id === spec.id && pre.tag === spec.tag && pre.rate === rate) { cur = pre; pre = null; }
+      let fromPre = false;
+      if (pre && pre.id === spec.id && pre.tag === spec.tag && pre.rate === rate) { cur = pre; pre = null; fromPre = true; }
       else { if (pre) { pre.dec.kill(); pre = null; } cur = { id: spec.id, tag: spec.tag, rate, dec: new Decoder(track, spec.startSec || 0, rate) }; }
       const gain = spec.gain == null ? 1 : spec.gain;
-      yield { k: 'start', track, tag: spec.tag, startSec: spec.startSec || 0, rate, gain };
+      // head cache: the first seconds of a slow-to-start track are already decoded, so audio starts at once
+      const startedAt = spec.startSec || 0, heads = opts.heads;
+      let head = null;
+      if (heads && !(startedAt > 0)) { try { head = await heads.get(track, rate); } catch (_) { head = null; } }
+      yield { k: 'start', track, tag: spec.tag, startSec: startedAt, rate, gain };
 
       const dec = cur.dec;
-      const startedAt = spec.startSec || 0;
       const preloadAtFrame = Math.max(0, Math.round((track.duration - startedAt - PRELOAD_BEFORE_END_S) * rate));
-      let produced = 0;
-      for await (const buf of dec.chunks()) {
-        produced += buf.length / BYTES_PER_FRAME;
+      let produced = 0, skip = 0;
+      const rec = [], recWant = headFrames(rate); let recFrames = 0;
+      const maybePreload = () => {
         if (!pre && produced >= preloadAtFrame) {
           const n = getNext();
           const nt = n && library.get(n.id);
           if (nt) { const r = rateFor(nt); pre = { id: n.id, tag: n.tag, rate: r, dec: new Decoder(nt, 0, r) }; }
         }
+      };
+      if (head) {
+        skip = head.frames;
+        for (let o = 0; o < head.buf.length; o += CHUNK_BYTES) {
+          const piece = head.buf.subarray(o, Math.min(head.buf.length, o + CHUNK_BYTES));
+          produced += piece.length / BYTES_PER_FRAME;
+          maybePreload();
+          yield { k: 'pcm', buf: applyGain(piece, gain) };
+        }
+      }
+      for await (let buf of dec.chunks()) {
+        if (skip > 0) {                                      // these seconds were already played from the cache
+          const f = buf.length / BYTES_PER_FRAME;
+          if (f <= skip) { skip -= f; continue; }
+          buf = buf.subarray(skip * BYTES_PER_FRAME); skip = 0;
+        }
+        produced += buf.length / BYTES_PER_FRAME;
+        if (heads && !head && !fromPre && !(startedAt > 0) && recFrames < recWant) {
+          const take = Math.min(buf.length / BYTES_PER_FRAME, recWant - recFrames);
+          rec.push(Buffer.from(buf.subarray(0, take * BYTES_PER_FRAME))); recFrames += take;
+        }
+        maybePreload();
         yield { k: 'pcm', buf: applyGain(buf, gain) };
       }
+      if (heads && !head && !fromPre && recFrames && heads.shouldStore(track, dec.firstAt ? dec.firstAt - dec.t0 : 0)) heads.put(track, rate, Buffer.concat(rec)).catch(() => {});
       const code = await dec.exited;
       if (produced === 0) {
         yield { k: 'error', track, tag: spec.tag, message: (dec.stderr.trim().split('\n').pop() || 'decoder produced no audio') + (code ? ` (exit ${code})` : '') };
@@ -124,4 +155,4 @@ async function* feed(opts) {
   }
 }
 
-module.exports = { feed, BYTES_PER_FRAME };
+module.exports = { feed, Decoder, BYTES_PER_FRAME, HEAD_SECONDS, headFrames };

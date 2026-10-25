@@ -16,23 +16,29 @@
   </header>
 
   <section id="transport">
-    <div class="btn-group">
-      <button id="b-prev" class="icon-btn" title="Previous (Ctrl+Left)" aria-label="Previous"></button>
-      <button id="b-play" class="icon-btn primary" title="Play / Pause (Space)" aria-label="Play"></button>
-      <button id="b-next" class="icon-btn" title="Next (Ctrl+Right)" aria-label="Next"></button>
-      <button id="b-stop" class="icon-btn" title="Stop" aria-label="Stop"></button>
+    <div id="tp-left">
+      <div class="btn-group">
+        <button id="b-prev" class="icon-btn" title="Previous" aria-label="Previous"></button>
+        <button id="b-play" class="icon-btn primary" title="Play / Pause" aria-label="Play"></button>
+        <button id="b-next" class="icon-btn" title="Next" aria-label="Next"></button>
+        <button id="b-stop" class="icon-btn" title="Stop" aria-label="Stop"></button>
+      </div>
+      <div id="np-line"><span id="np-line-title">Nothing playing</span><span id="np-line-artist"></span></div>
     </div>
-    <div id="np-line"><span id="np-line-title">Nothing playing</span><span id="np-line-artist"></span></div>
-    <div id="seek" role="slider" tabindex="0" aria-label="Seek" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0">
-      <div class="seek-track"><div class="seek-buf"></div><div class="seek-fill"></div><div class="seek-thumb"></div></div>
+    <div id="tp-mid">
+      <div id="seek" role="slider" tabindex="0" aria-label="Seek" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0">
+        <div class="seek-track"><div class="seek-buf"></div><div class="seek-fill"></div><div class="seek-thumb"></div></div>
+      </div>
+      <div id="time">0:00 / 0:00</div>
     </div>
-    <div id="time">0:00 / 0:00</div>
-    <button id="b-order" class="icon-btn wide" title="Playback order"></button>
-    <button id="b-lyrics" class="icon-btn" title="Lyrics (L)" aria-label="Lyrics" aria-pressed="false"></button>
-    <button id="b-full" class="icon-btn" title="Fullscreen lyrics (F)" aria-label="Fullscreen"></button>
-    <div id="vol">
-      <button id="b-mute" class="icon-btn" aria-label="Mute"></button>
-      <div id="vol-slider" role="slider" tabindex="0" aria-label="Volume" aria-valuemin="0" aria-valuemax="100"><div class="seek-track"><div class="seek-fill"></div><div class="seek-thumb"></div></div></div>
+    <div id="tp-right">
+      <button id="b-order" class="icon-btn wide" title="Playback order"></button>
+      <button id="b-lyrics" class="icon-btn" title="Lyrics" aria-label="Lyrics" aria-pressed="false"></button>
+      <button id="b-full" class="icon-btn" title="Fullscreen lyrics" aria-label="Fullscreen"></button>
+      <div id="vol">
+        <button id="b-mute" class="icon-btn" aria-label="Mute"></button>
+        <div id="vol-slider" role="slider" tabindex="0" aria-label="Volume" aria-valuemin="0" aria-valuemax="100"><div class="seek-track"><div class="seek-fill"></div><div class="seek-thumb"></div></div></div>
+      </div>
     </div>
   </section>
 

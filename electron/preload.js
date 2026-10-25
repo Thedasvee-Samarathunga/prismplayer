@@ -9,6 +9,9 @@ contextBridge.exposeInMainWorld('prismHost', {
   // real window fullscreen (the UI also draws its own fullscreen lyrics screen)
   setFullscreen: (on) => ipcRenderer.send('fullscreen', !!on),
   onFullscreen: (cb) => ipcRenderer.on('fullscreen', (_e, v) => cb(!!v)),
-  // dropped files -> real file system paths
+  // system-wide hotkeys: [{action, accelerator}] -> {ok: [...], failed: [...]}
+  setGlobalHotkeys: (list) => ipcRenderer.invoke('global-hotkeys', list),
+  onHotkey: (cb) => ipcRenderer.on('hotkey', (_e, action) => cb(String(action))),
+  // dropped files / folders -> real file system paths
   pathsFromDrop: (files) => Array.from(files).map((f) => webUtils.getPathForFile(f)).filter(Boolean),
 });

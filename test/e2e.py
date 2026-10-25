@@ -256,7 +256,7 @@ def run(data):
         pg.screenshot(path=f"{OUT}/11-settings-library.png")
         pg.click(".tabs-inline .tab:has-text('Scrobbling')"); pg.wait_for_selector("#lf-key")
         pg.screenshot(path=f"{OUT}/12-settings-scrobble.png")
-        pg.click(".tabs-inline .tab:has-text('Playback')"); pg.wait_for_selector("#dyn")
+        pg.click(".tabs-inline .tab:has-text('Playback')"); pg.wait_for_selector("#rg")
         pg.keyboard.press("Escape"); pg.wait_for_timeout(250)
         check("Escape closes the dialog", pg.locator(".modal").count() == 0)
         pg.click("#menubar >> text=Library"); pg.click(".menu-item:has-text('Configure')"); pg.wait_for_selector(".modal")

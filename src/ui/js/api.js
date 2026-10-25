@@ -28,6 +28,7 @@ export const api = {
   nowPlaying: (id) => api.post('/api/scrobble/nowplaying', { id }),
   scrobble: (id, timestamp) => api.post('/api/scrobble/submit', { id, timestamp }),
   flushScrobbles: () => api.post('/api/scrobble/flush'),
+  warm: (ids, deep, rate) => fetch('/api/warm', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids, deep: !!deep, rate: rate || 0 }) }).catch(() => {}),
   audioUrl: (id) => `/api/audio?id=${encodeURIComponent(id)}`,
   coverUrl: (id, size) => `/api/cover?id=${encodeURIComponent(id)}${size ? '&size=' + size : ''}`,
 };

@@ -3,19 +3,22 @@ import { api } from './api.js';
 import { S, on, emit, loadAll, loadLibrary, persist, saveNow, saveSettings, createPlaylist, activePlaylist } from './state.js';
 import { engine } from './player.js';
 import { P, playItem, toggle, stop, next, prev, seekBy, order, initMediaSession } from './playback.js';
-import { initTheme, themeForTrack } from './theme.js';
+import { initTheme, themeForTrack, styleOf } from './theme.js';
 import { initViz } from './viz.js';
 import { initLibraryView } from './libview.js';
 import { initPlaylistView, newPlaylist, sortBy, shufflePlaylist } from './plview.js';
 import { initSideView } from './sideview.js';
 import { initTransport, initScrobbleStatus, slider } from './transport.js';
 import { initLyrics, toggleLyrics, toggleFullscreen, setFullscreen, isFullscreen } from './lyrics.js';
+import { initRecap, openRecap, closeRecap, isRecapOpen, ribbonLabel } from './recap.js';
 import { mountMenuBar } from './menus.js';
 import { toast, settingsDialog, shortcutsDialog, aboutDialog, browseDialog } from './dialogs.js';
 import { eqDialog, applyEq } from './eqdialog.js';
 import { reapplyGain } from './playback.js';
 import { addFilesToPlaylist, rescan, revealTrack } from './actions.js';
 import { ORDERS } from './queue.js';
+import { resolveBindings, eventToCombo, shouldFire, actionFor, pretty, globalList } from './hotkeys.js';
+import { initDropFiles } from './dropfiles.js';
 
 const $ = (id) => document.getElementById(id);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -46,12 +49,14 @@ on('scan-start', () => { sleep(150).then(watchScan); });
 
 // ------------------------------------------------------------------ layout
 function applyLayout() {
-  const main = $('main');
-  main.style.setProperty('--left-w', S.layout.left + 'px');
-  main.style.setProperty('--right-w', S.layout.right + 'px');
+  const main = $('main'), app = $('app');
+  app.style.setProperty('--left-w', S.layout.left + 'px');        // set on #app so the panels AND the transport row share the columns
+  app.style.setProperty('--right-w', S.layout.right + 'px');
   main.classList.toggle('hide-lib', !!S.layout.hideLib);
   main.classList.toggle('hide-side', !!S.layout.hideSide);
-  $('app').classList.toggle('no-viz', !!S.layout.hideViz);
+  app.classList.toggle('hide-lib', !!S.layout.hideLib);
+  app.classList.toggle('hide-side', !!S.layout.hideSide);
+  app.classList.toggle('no-viz', !!S.layout.hideViz);
 }
 function initSplitters() {
   const drag = (el, side) => {
@@ -112,7 +117,8 @@ function menuDefs() {
       { label: 'Follow playback', checked: S.follow, action: () => { S.follow = !S.follow; persist(); } },
       { label: 'Scroll to playing track', action: () => plView.scrollToPlaying() },
       { sep: true },
-      { label: 'Colours follow album art', checked: S.settings.dynamicColors !== false, action: () => saveSettings({ dynamicColors: S.settings.dynamicColors === false }) },
+      { label: 'Colours', submenu: [['standard', 'Album colours'], ['vivid', 'Album colours: vivid'], ['mono', 'Black and white']].map(([id, l]) => ({ label: l, radio: styleOf(S.settings).colors === id, action: () => saveSettings({ appearance: { colors: id }, dynamicColors: id !== 'mono' }) })) },
+      { label: 'Look', submenu: [['flat', 'Flat'], ['frost', 'Frosted pastel']].map(([id, l]) => ({ label: l, radio: styleOf(S.settings).look === id, disabled: styleOf(S.settings).colors === 'mono', action: () => saveSettings({ appearance: { look: id } }) })) },
     ] },
     { label: 'Playback', items: () => [
       { label: P.state === 'playing' ? 'Pause' : 'Play', key: 'Space', action: toggle },
@@ -132,6 +138,7 @@ function menuDefs() {
       { label: 'Rescan', action: rescan },
       { label: 'Scan ReplayGain (tracks without tags)', action: () => api.post('/api/replaygain/scan', {}).then(() => toast('Measuring loudness in the background…', { ms: 2500 })).catch((e) => toast(e.message, { error: true })) },
     ] },
+    { label: 'Recap', html: ribbonLabel(), className: 'recap-btn', title: 'Your Last.fm listening recap: streaks, top artists, trends, charts and genres', action: openRecap },
     { label: 'Help', items: () => [
       { label: 'Keyboard shortcuts', action: shortcutsDialog },
       { label: 'About Prism', action: () => aboutDialog(`${S.list.length} tracks in library.`) },
@@ -140,28 +147,60 @@ function menuDefs() {
 }
 
 // ------------------------------------------------------------------ keyboard
+let bindings = resolveBindings(null);
+const REPEATABLE = new Set(['volup', 'voldown', 'seekfwd', 'seekback']);
+function runAction(id) {
+  switch (id) {
+    case 'playpause': return toggle();
+    case 'next': return next(false);
+    case 'prev': return prev();
+    case 'stop': return stop();
+    case 'volup': return transport.setVol(S.volume + 0.05);
+    case 'voldown': return transport.setVol(S.volume - 0.05);
+    case 'mute': return transport.setVol(S.volume || 0.5, !S.muted);
+    case 'seekfwd': return seekBy(5);
+    case 'seekback': return seekBy(-5);
+    case 'shuffle': { const i = ORDERS.findIndex((o) => o.id === S.order); S.order = ORDERS[(i + 1) % ORDERS.length].id; transport.paintOrder(); persist(); emit('order'); toast('Order: ' + ORDERS.find((o) => o.id === S.order).label, { ms: 1600 }); return; }
+    case 'stopafter': S.stopAfter = !S.stopAfter; transport.paintOrder(); persist(); emit('stopafter'); toast(S.stopAfter ? 'Will stop after this track' : 'Will keep playing', { ms: 1600 }); return;
+    case 'lyrics': return toggleLyrics();
+    case 'fullscreen': return toggleFullscreen();
+    case 'recap': return isRecapOpen() ? closeRecap() : openRecap();
+    case 'filter': return libView.focusFilter();
+    case 'newplaylist': return newPlaylist();
+    case 'settings': return openSettings();
+    default: return undefined;
+  }
+}
+function updateTitles() {
+  const t = (id, base, action) => { const el = $(id); if (el) el.title = bindings[action] ? `${base} (${pretty(bindings[action])})` : base; };
+  t('b-prev', 'Previous', 'prev'); t('b-play', 'Play / Pause', 'playpause'); t('b-next', 'Next', 'next'); t('b-stop', 'Stop', 'stop'); t('b-mute', 'Mute', 'mute');
+  t('b-lyrics', 'Lyrics', 'lyrics'); t('b-full', 'Fullscreen lyrics', 'fullscreen');
+  const cb = $('cover-lyr-btn'); if (cb) cb.title = bindings.lyrics ? `Show lyrics on the cover (${pretty(bindings.lyrics)})` : 'Show lyrics on the cover';
+}
+async function applyGlobalHotkeys() {
+  const host = window.prismHost;
+  if (!host || !host.setGlobalHotkeys) return;
+  const list = S.settings.hotkeyGlobal ? globalList(bindings) : [];
+  try { S.globalHotkeyStatus = await host.setGlobalHotkeys(list); } catch (_) { S.globalHotkeyStatus = { ok: [], failed: list.map((x) => x.accelerator) }; }
+}
 function initKeys() {
+  bindings = resolveBindings(S.settings.hotkeys); updateTitles(); applyGlobalHotkeys();
+  on('settings', () => { bindings = resolveBindings(S.settings.hotkeys); updateTitles(); applyGlobalHotkeys(); });
+  if (window.prismHost && window.prismHost.onHotkey) window.prismHost.onHotkey((id) => runAction(id));
   window.addEventListener('keydown', (e) => {
-    const t = e.target;
-    const typing = t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable);
-    const modalOpen = !!document.querySelector('.modal-wrap');
-    const mod = e.ctrlKey || e.metaKey;
-    if (mod && e.key.toLowerCase() === 'f') { e.preventDefault(); libView.focusFilter(); return; }
-    if (modalOpen) return;
-    if (mod && e.key.toLowerCase() === 'n') { e.preventDefault(); newPlaylist(); return; }
-    if (mod && e.key === ',') { e.preventDefault(); openSettings(); return; }
+    if (S.hotkeyCapture) return;                                           // the Hotkeys settings tab is listening for a new combination
     if (e.key === 'F11') { e.preventDefault(); toggleFullscreen(); return; }
+    if (e.key === 'Escape' && isRecapOpen() && !document.querySelector('.modal-wrap')) { e.preventDefault(); closeRecap(); return; }       // whatever has the focus
     if (e.key === 'Escape' && isFullscreen()) { e.preventDefault(); setFullscreen(false); return; }
-    if (typing) return;
-    if (!mod && !e.altKey && (e.key === 'l' || e.key === 'L')) { e.preventDefault(); toggleLyrics(); return; }
-    if (!mod && !e.altKey && (e.key === 'f' || e.key === 'F')) { e.preventDefault(); toggleFullscreen(); return; }
-    if (e.key === ' ' && !mod) { e.preventDefault(); toggle(); return; }
-    if (mod && e.key === 'ArrowRight') { e.preventDefault(); next(false); }
-    else if (mod && e.key === 'ArrowLeft') { e.preventDefault(); prev(); }
-    else if (mod && e.key === 'ArrowUp') { e.preventDefault(); transport.setVol(S.volume + 0.05); }
-    else if (mod && e.key === 'ArrowDown') { e.preventDefault(); transport.setVol(S.volume - 0.05); }
-    else if (e.shiftKey && e.key === 'ArrowRight') { e.preventDefault(); seekBy(5); }
-    else if (e.shiftKey && e.key === 'ArrowLeft') { e.preventDefault(); seekBy(-5); }
+    const t = e.target;
+    const typing = !!(t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable));
+    const combo = eventToCombo(e);
+    if (!shouldFire(combo, { typing, modalOpen: !!document.querySelector('.modal-wrap'), capturing: false })) return;
+    const id = actionFor(bindings, combo);
+    if (!id) return;
+    e.preventDefault();
+    if (e.repeat && !REPEATABLE.has(id)) return;
+    runAction(id);
   }, true);
 }
 
@@ -186,9 +225,12 @@ async function boot() {
   transport = initTransport();
   initLyrics({ slider });
   initScrobbleStatus();
+  initRecap();
+  document.addEventListener('prism:open-settings', (e) => settingsDialog({ onFoldersChanged: rescan, tab: e.detail }));
   initMediaSession();
   initSplitters();
   initKeys();
+  initDropFiles({ dropIndex: (e) => plView.dropIndexAt(e), onDone: () => plView.hideDropLine() });
   mountMenuBar($('menubar'), menuDefs());
 
   window.__prismCurrentTrack = () => (P.cur ? P.cur.track : null);

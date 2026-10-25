@@ -11,7 +11,7 @@ import { toast } from './dialogs.js';
 
 export const LY = { track: null, data: null, state: 'idle', error: '' };   // idle | loading | lines | none | instrumental | error
 const views = new Set();
-let token = 0, fsOpen = false, raf = 0;
+let token = 0, fsOpen = false, raf = 0, domFs = false;      // domFs: the browser really is in fullscreen because we asked it to
 
 // ------------------------------------------------------------------------------------ the view
 export class LyricsView {
@@ -145,6 +145,8 @@ export function applyLyricsLayout() {
   for (const id of ['b-lyrics', 'cover-lyr-btn']) { const b = document.getElementById(id); if (b) { b.classList.toggle('on', !!S.layout.lyrics); b.setAttribute('aria-pressed', String(!!S.layout.lyrics)); } }
   const main = document.getElementById('main');
   if (main) main.classList.toggle('hide-side', !!S.layout.hideSide);
+  const app = document.getElementById('app');
+  if (app) app.classList.toggle('hide-side', !!S.layout.hideSide);
 }
 
 // ------------------------------------------------------------------------------------ fullscreen
@@ -180,7 +182,7 @@ export function setFullscreen(open) {
   }
   if (window.prismHost && window.prismHost.setFullscreen) window.prismHost.setFullscreen(open);
   else if (open && document.documentElement.requestFullscreen && !document.fullscreenElement) document.documentElement.requestFullscreen().catch(() => {});
-  else if (!open && document.fullscreenElement && document.exitFullscreen) document.exitFullscreen().catch(() => {});
+  else if (!open && document.fullscreenElement && document.exitFullscreen) { domFs = false; document.exitFullscreen().catch(() => {}); }      // (our own exit: its late event must not close a screen opened again meanwhile)
   push(); kick();
 }
 export const toggleFullscreen = () => setFullscreen(!fsOpen);
@@ -218,7 +220,10 @@ export function initLyrics({ slider }) {
   fsEls.root.addEventListener('mousemove', wakeFs);
   fsEls.root.addEventListener('keydown', wakeFs);
   fsEls.root.addEventListener('mousedown', wakeFs);
-  document.addEventListener('fullscreenchange', () => { if (!document.fullscreenElement && fsOpen && !(window.prismHost && window.prismHost.setFullscreen)) setFullscreen(false); });
+  document.addEventListener('fullscreenchange', () => {
+    if (document.fullscreenElement) { domFs = true; return; }
+    if (domFs) { domFs = false; if (fsOpen && !(window.prismHost && window.prismHost.setFullscreen)) setFullscreen(false); }       // the user left browser fullscreen themselves
+  });
   if (window.prismHost && window.prismHost.onFullscreen) window.prismHost.onFullscreen((v) => { if (!v && fsOpen) { fsOpen = true; setFullscreen(false); } });
 
   // buttons

@@ -38,6 +38,7 @@ export async function playItem(pid, u, { startAt = 0, autoplay = true } = {}) {
   resetCounters(); P.lastPos = startAt || 0; P.userStopped = false;
   order.started(u);
   emit('nowplaying', P.cur);
+  warmUpcoming();
   const go = () => engine.load(track, { autoplay, startAt, gain: gainFor(track), tag, next: null });
   try {
     await go();
@@ -111,6 +112,25 @@ function onError(msg) {
   if (P.errors < 3) setTimeout(() => next(true), 350); else { P.errors = 0; stop(); }
 }
 
+// ------------------------------------------------------------------ warming: get the start of upcoming tracks ready (see server/headcache.js)
+const warmedAt = new Map();
+export function warm(ids, deep) {
+  const now = Date.now(), fresh = ids.filter((id) => id && !(now - (warmedAt.get(id + (deep ? 'd' : 'f')) || 0) < 30000));
+  if (!fresh.length) return;
+  for (const id of fresh) warmedAt.set(id + (deep ? 'd' : 'f'), now);
+  if (warmedAt.size > 500) warmedAt.delete(warmedAt.keys().next().value);
+  const impl = engine.impl, rate = impl && impl.kind === 'web' && impl.ctx ? impl.ctx.sampleRate : 0;
+  api.warm(fresh, deep, rate);
+}
+function warmUpcoming() {
+  if (!P.cur || S.settings.cache && S.settings.cache.prefetch === false || S.order === 'shuffle') return;
+  const list = items(P.cur.pid), i = list.findIndex((x) => x.u === P.cur.u);
+  if (i < 0) return;
+  const ids = [];
+  for (let k = 1; k <= 3; k++) { const it = list[(i + k) % list.length]; if (!it || (i + k >= list.length && S.order !== 'repeat-playlist')) break; ids.push(it.id); }
+  warm(ids, true);
+}
+
 // ------------------------------------------------------------------ arming the next track (gapless)
 export function armNext() {
   if (!P.cur || !P.tail) return;
@@ -123,6 +143,7 @@ export function armNext() {
   const track = item && S.tracks.get(item.id);
   if (!track) { engine.setNext(null); return; }
   engine.setNext({ id: track.id, tag: mkTag(u), gain: gainFor(track), track });
+  warm([track.id], true);                                       // (also covers shuffle: the armed track is always warmed)
 }
 
 on('engine:committed', ({ tag }) => {
@@ -146,6 +167,7 @@ on('engine:trackstart', ({ tag }) => {
   order.started(u);
   emit('nowplaying', P.cur);
   api.nowPlaying(track.id).catch(() => {});
+  warmUpcoming();
 });
 
 // ------------------------------------------------------------------ engine events

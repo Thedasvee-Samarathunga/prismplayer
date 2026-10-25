@@ -8,6 +8,15 @@ const hex = (c) => toHex(c);
 const rgba = (c, a) => `rgba(${Math.round(c.r * 255)},${Math.round(c.g * 255)},${Math.round(c.b * 255)},${a})`;
 const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
 
+// The Vivid colour mode gives each theme 4 shades taken from the cover; the standard look keeps its two accents (drawn exactly as before).
+const multi = (t) => !!(t.shades && t.shades.length > 2);
+const palette = (t) => (multi(t) ? t.shades : [t.accent2, t.accent]);
+export function shadeAt(t, u) {
+  const sh = palette(t), x = clamp01(u) * (sh.length - 1), i = Math.min(sh.length - 2, Math.floor(x));
+  return mix(sh[i], sh[i + 1], x - i);
+}
+function stops(g, t) { const sh = palette(t); sh.forEach((c, i) => g.addColorStop(i / (sh.length - 1), hex(c))); }
+
 // level of `n` log-spaced bands between fLo and fHi, 0..1 (dB mapped, slight treble tilt so highs are visible)
 export function bandLevels(freq, sr, n, fLo = 40, fHi = 16000) {
   const out = new Float32Array(n);
@@ -47,11 +56,12 @@ function spectrum() {
       for (let i = 0; i < n; i++) { if (bars[i] >= peaks[i]) { peaks[i] = bars[i]; hold[i] = 18; } else if (hold[i] > 0) hold[i]--; else peaks[i] = Math.max(0, peaks[i] - 0.012); }
       const x0 = pad + (w - pad * 2 - (n * bw + (n - 1) * gap)) / 2, H = h - pad * 2, base = h - pad;
       const g = c.createLinearGradient(0, base, 0, pad);
-      g.addColorStop(0, hex(t.accent2)); g.addColorStop(1, hex(t.accent));
+      stops(g, t);
       c.fillStyle = g; c.shadowColor = rgba(t.accent, 0.55); c.shadowBlur = 10 * dpr;
       for (let i = 0; i < n; i++) {
         if (bars[i] < 0.012) continue;
         const bh = Math.max(2 * dpr, bars[i] * H), x = x0 + i * (bw + gap);
+        if (multi(t)) c.fillStyle = hex(shadeAt(t, i / (n - 1)));
         c.beginPath(); c.roundRect(x, base - bh, bw, bh, Math.min(3 * dpr, bw / 2)); c.fill();
       }
       c.shadowBlur = 0; c.fillStyle = hex(t.fg);
@@ -76,7 +86,7 @@ function led() {
         const lit = Math.round(bars[i] * rows), pk = Math.round(peaks[i] * rows);
         for (let r = 0; r < rows; r++) {
           const y = base - (r + 1) * (seg + sg) + sg;
-          if (r < lit) c.fillStyle = hex(mix(t.accent2, t.accent, r / rows));
+          if (r < lit) c.fillStyle = hex(multi(t) ? shadeAt(t, i / (n - 1) * 0.6 + (r / rows) * 0.4) : mix(t.accent2, t.accent, r / rows));
           else if (r === pk - 1 && pk > lit) c.fillStyle = hex(t.fg);
           else c.fillStyle = rgba(t.fg, 0.07);
           c.fillRect(x0 + i * (bw + gap), y, bw, seg);
@@ -97,11 +107,11 @@ function mirror() {
       if (bars.length !== n) bars = new Float32Array(n);
       follow(bars, f.bands(n), 0.88);
       const x0 = pad + (w - pad * 2 - (n * bw + (n - 1) * gap)) / 2;
-      const up = c.createLinearGradient(0, mid, 0, pad); up.addColorStop(0, hex(t.accent2)); up.addColorStop(1, hex(t.accent));
+      const up = c.createLinearGradient(0, mid, 0, pad); stops(up, t);
       c.shadowColor = rgba(t.accent, 0.5); c.shadowBlur = 8 * dpr;
       for (let i = 0; i < n; i++) {
         const bh = Math.max(1.5 * dpr, bars[i] * half), x = x0 + i * (bw + gap);
-        c.fillStyle = up; c.beginPath(); c.roundRect(x, mid - bh, bw, bh, Math.min(3 * dpr, bw / 2)); c.fill();
+        c.fillStyle = multi(t) ? hex(shadeAt(t, i / (n - 1))) : up; c.beginPath(); c.roundRect(x, mid - bh, bw, bh, Math.min(3 * dpr, bw / 2)); c.fill();
         c.fillStyle = rgba(t.accent2, 0.55); c.beginPath(); c.roundRect(x, mid + 1.5 * dpr, bw, bh * 0.85, Math.min(3 * dpr, bw / 2)); c.fill();
       }
       c.shadowBlur = 0; c.fillStyle = rgba(t.fg, 0.14); c.fillRect(pad, mid - 0.5 * dpr, w - pad * 2, 1 * dpr);
@@ -128,7 +138,7 @@ function area() {
       const fill = c.createLinearGradient(0, pad, 0, base);
       fill.addColorStop(0, rgba(t.accent, 0.55)); fill.addColorStop(1, rgba(t.accent2, 0.05));
       path(); c.lineTo(pts[n - 1][0], base); c.lineTo(pts[0][0], base); c.closePath(); c.fillStyle = fill; c.fill();
-      const line = c.createLinearGradient(pad, 0, w - pad, 0); line.addColorStop(0, hex(t.accent2)); line.addColorStop(1, hex(t.accent));
+      const line = c.createLinearGradient(pad, 0, w - pad, 0); stops(line, t);
       path(); c.strokeStyle = line; c.lineWidth = 2.2 * dpr; c.lineJoin = 'round'; c.shadowColor = rgba(t.accent, 0.6); c.shadowBlur = 9 * dpr; c.stroke(); c.shadowBlur = 0;
     },
   };
@@ -154,7 +164,7 @@ function radial() {
       c.shadowColor = rgba(t.accent, 0.5); c.shadowBlur = 8 * dpr;
       for (let i = 0; i < n; i++) {
         const a = spin * Math.PI * 2 + (i / n) * Math.PI * 2 - Math.PI / 2, l = Math.max(2 * dpr, bars[i] * len);
-        c.strokeStyle = hex(mix(t.accent2, t.accent, Math.abs(i / n - 0.5) * 2));
+        c.strokeStyle = hex(multi(t) ? shadeAt(t, i / n) : mix(t.accent2, t.accent, Math.abs(i / n - 0.5) * 2));
         c.beginPath(); c.moveTo(cx + Math.cos(a) * r0, cy + Math.sin(a) * r0); c.lineTo(cx + Math.cos(a) * (r0 + l), cy + Math.sin(a) * (r0 + l)); c.stroke();
       }
       c.shadowBlur = 0; c.beginPath(); c.arc(cx, cy, r0 * 0.78, 0, Math.PI * 2); c.fillStyle = rgba(t.accent, 0.08 + bass * 0.22); c.fill();
@@ -168,7 +178,7 @@ function scope() {
     draw(c, f) {
       const { w, h, dpr, t, time } = f;
       c.strokeStyle = rgba(t.fg, 0.1); c.lineWidth = dpr; c.beginPath(); c.moveTo(0, h / 2); c.lineTo(w, h / 2); c.stroke();
-      const g = c.createLinearGradient(0, 0, w, 0); g.addColorStop(0, hex(t.accent2)); g.addColorStop(1, hex(t.accent));
+      const g = c.createLinearGradient(0, 0, w, 0); stops(g, t);
       c.strokeStyle = g; c.lineWidth = 2 * dpr; c.lineJoin = 'round'; c.shadowColor = rgba(t.accent, 0.6); c.shadowBlur = 9 * dpr;
       c.beginPath();
       if (f.live && time && time.length) {
@@ -333,7 +343,7 @@ function ripple() {
       rings = rings.filter((q) => q.a > 0.02);
       for (const q of rings) {
         q.r += f.dt * 0.12 * q.s * dpr; q.a *= Math.pow(0.9965, f.dt);
-        c.strokeStyle = rgba(mix(t.accent2, t.accent, q.r / maxR), q.a); c.lineWidth = (2 + 5 * q.a) * dpr;
+        c.strokeStyle = rgba(multi(t) ? shadeAt(t, q.r / maxR) : mix(t.accent2, t.accent, q.r / maxR), q.a); c.lineWidth = (2 + 5 * q.a) * dpr;
         c.beginPath(); c.arc(cx, cy, q.r, 0, Math.PI * 2); c.stroke();
       }
       c.fillStyle = rgba(t.accent, 0.25 + energy * 0.6); c.shadowColor = rgba(t.accent, 0.7); c.shadowBlur = 14 * dpr;

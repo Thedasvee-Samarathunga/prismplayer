@@ -1,11 +1,20 @@
 'use strict';
 // Electron shell: starts the local Prism server in-process and shows the UI in a window.
-// Any startup problem is written to prism-error.log (in the Prism data folder) and shown in a message box,
-// instead of the app silently closing.
-const { app, BrowserWindow, shell, nativeTheme, ipcMain, Menu, dialog } = require('electron');
+//
+// Hardened so that the app can never "open and silently vanish":
+//  * every start-up problem is written to prism-error.log (in the Prism data folder) and shown in a message box
+//  * a second launch never just disappears: the running copy is brought to the front (or opens a window if it has none)
+//  * if the previous start never got a window on screen, this start runs in safe mode (no hardware acceleration); if that works it stays that way
+//  * a crash of the graphics process restarts the app with hardware acceleration off
+//  * `--smoke-test` runs a self-test of the installed app (used by the GitHub build)
+const { app, BrowserWindow, shell, nativeTheme, ipcMain, Menu, dialog, globalShortcut } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+const boot = require('./boot');
+
+const args = boot.parseArgs(process.argv);
+if (args.smoke) app.setPath('userData', fs.mkdtempSync(path.join(os.tmpdir(), 'prism-smoke-')));      // a throw-away profile: never collides with a running Prism
 
 // ------------------------------------------------------------------ error logging
 let logFile = null;
@@ -24,6 +33,7 @@ let shownFatal = false;
 function fatal(title, err) {
   const text = err && err.stack ? err.stack : String(err);
   log(`${title}: ${text}`);
+  if (args.smoke) { app.exit(1); return; }
   if (shownFatal) return;
   shownFatal = true;
   try { dialog.showErrorBox('Prism could not start', `${title}\n\n${text}\n\nThis was saved to:\n${logPath()}`); } catch (_) { /* ignore */ }
@@ -32,11 +42,27 @@ function fatal(title, err) {
 process.on('uncaughtException', (e) => fatal('Unexpected error', e));
 process.on('unhandledRejection', (e) => fatal('Unexpected error (promise)', e));
 
+// ------------------------------------------------------------------ single instance
+// (decided FIRST: a launch that hands over to the running copy must not touch the start-up bookkeeping below)
+const gotLock = args.smoke ? true : app.requestSingleInstanceLock();
+if (!gotLock) { log('another Prism is already running: handing over to it and closing this launch'); app.quit(); }
+
+// ------------------------------------------------------------------ safe mode (graphics problems)
+const userDataDir = app.getPath('userData');
+const launch = gotLock ? boot.beginLaunch(userDataDir, { safeArg: args.safe, enableGpu: args.enableGpu }) : { previousFailed: false, failures: 0, safeMode: false, gpuFlag: false };
+if (launch.safeMode) { app.disableHardwareAcceleration(); log(`safe mode: hardware acceleration is off (${launch.previousFailed ? 'the previous start did not finish, ' + launch.failures + ' in a row' : launch.gpuFlag ? 'a past graphics problem' : '--safe'})`); }
+
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 nativeTheme.themeSource = 'dark';
 
-const gotLock = app.requestSingleInstanceLock();
-if (!gotLock) app.quit();
+let relaunching = false;
+app.on('child-process-gone', (_e, d) => {
+  log('child process gone: ' + JSON.stringify(d));
+  if (d && d.type === 'GPU' && !launch.safeMode && !relaunching && !args.smoke) {
+    relaunching = true; boot.setGpuOff(userDataDir); log('the graphics process crashed: restarting with hardware acceleration off');
+    app.relaunch(); app.exit(0);
+  }
+});
 
 let win = null;
 let server = null;
@@ -53,9 +79,10 @@ function saveBounds() {
   } catch (_) { /* ignore */ }
 }
 
-async function createWindow() {
-  log('starting Prism ' + app.getVersion() + ' (Electron ' + process.versions.electron + ', resources: ' + process.resourcesPath + ')');
-  const { startServer } = require('../src/server');     // loaded here so a problem in it is caught and reported
+async function startTheServer() {
+  if (server) return server;
+  log('starting Prism ' + app.getVersion() + ' (Electron ' + process.versions.electron + ', packaged: ' + app.isPackaged + ', resources: ' + process.resourcesPath + ')');
+  const { startServer } = require('../src/server');       // loaded here so a problem in it is caught and reported
   server = await startServer({
     dataDir: app.getPath('userData'),
     uiDir: path.join(__dirname, '..', 'src', 'ui'),
@@ -63,6 +90,11 @@ async function createWindow() {
     reveal: (p, isDir) => { if (isDir) shell.openPath(p); else shell.showItemInFolder(p); },
   });
   log('local server on ' + server.url);
+  return server;
+}
+
+async function createWindow() {
+  await startTheServer();
   Menu.setApplicationMenu(null);
   const b = loadBounds();
   win = new BrowserWindow({
@@ -82,12 +114,15 @@ async function createWindow() {
   win.once('ready-to-show', () => win.show());
   setTimeout(() => { if (win && !win.isDestroyed() && !win.isVisible()) { log('window was not ready after 3 s, showing it anyway'); win.show(); } }, 3000);
   win.on('close', saveBounds);
-  const tell = (v) => { if (win && !win.isDestroyed()) win.webContents.send('fullscreen', v); };
-  win.on('enter-full-screen', () => tell(true));
-  win.on('leave-full-screen', () => tell(false));
+  win.on('closed', () => { win = null; });
+  const tell = (ch, v) => { if (win && !win.isDestroyed()) win.webContents.send(ch, v); };
+  win.on('enter-full-screen', () => tell('fullscreen', true));
+  win.on('leave-full-screen', () => tell('fullscreen', false));
 
-  win.webContents.on('did-fail-load', (_e, code, desc, url) => log(`page failed to load: ${desc} (${code}) ${url}`));
-  win.webContents.on('render-process-gone', (_e, d) => log('renderer process gone: ' + JSON.stringify(d)));
+  let reloaded = false;
+  win.webContents.on('did-finish-load', () => { if (boot.finishLaunch(userDataDir, launch)) log('start-up worked in safe mode: hardware acceleration stays off (start with --enable-gpu to try it again)'); });
+  win.webContents.on('did-fail-load', (_e, code, desc, url, isMain) => { log(`page failed to load: ${desc} (${code}) ${url}`); if (isMain && code !== -3) fatal('The window could not load the player', new Error(`${desc} (${code}) ${url}`)); });
+  win.webContents.on('render-process-gone', (_e, d) => { log('renderer process gone: ' + JSON.stringify(d)); if (!reloaded && win && !win.isDestroyed()) { reloaded = true; win.reload(); } });
   win.webContents.on('preload-error', (_e, p, err) => log('preload error in ' + p + ': ' + (err && err.stack ? err.stack : err)));
   win.webContents.on('console-message', (_e, level, message, line, source) => { if (level >= 3) log(`page error: ${message} (${source}:${line})`); });
 
@@ -103,6 +138,11 @@ async function createWindow() {
   log('window loaded');
 }
 
+function showWindow() {
+  if (win && !win.isDestroyed()) { if (win.isMinimized()) win.restore(); win.show(); win.focus(); return true; }
+  return false;
+}
+
 ipcMain.on('titlebar', (_e, bg, fg) => {
   if (!win || win.isDestroyed() || typeof bg !== 'string' || typeof fg !== 'string') return;
   try { win.setTitleBarOverlay({ color: bg, symbolColor: fg, height: 36 }); } catch (_) { /* not supported */ }
@@ -110,7 +150,35 @@ ipcMain.on('titlebar', (_e, bg, fg) => {
 ipcMain.on('show-in-folder', (_e, p) => { if (typeof p === 'string') shell.showItemInFolder(p); });
 ipcMain.on('fullscreen', (_e, on) => { if (win && !win.isDestroyed()) win.setFullScreen(!!on); });
 
-app.on('second-instance', () => { if (win) { if (win.isMinimized()) win.restore(); win.focus(); } });
-if (gotLock) app.whenReady().then(createWindow).catch((e) => fatal('Could not start the player', e));
+// Global (system-wide) hotkeys: the UI sends the list it wants; we register what the system allows and report back.
+ipcMain.handle('global-hotkeys', (_e, list) => {
+  const ok = [], failed = [];
+  try { globalShortcut.unregisterAll(); } catch (_) { /* ignore */ }
+  for (const item of (Array.isArray(list) ? list : []).slice(0, 40)) {
+    if (!item || typeof item.accelerator !== 'string' || typeof item.action !== 'string' || item.accelerator.length > 60) continue;
+    try {
+      const reg = globalShortcut.register(item.accelerator, () => { if (win && !win.isDestroyed()) win.webContents.send('hotkey', item.action); });
+      (reg ? ok : failed).push(item.accelerator);
+    } catch (_) { failed.push(item.accelerator); }
+  }
+  return { ok, failed };
+});
+app.on('will-quit', () => { try { globalShortcut.unregisterAll(); } catch (_) { /* ignore */ } });
+
+app.on('second-instance', () => {
+  if (showWindow()) return;
+  log('a second launch arrived but there is no window: opening one');
+  createWindow().catch((e) => fatal('Could not open the window', e));
+});
+if (gotLock) {
+  app.whenReady().then(async () => {
+    if (args.smoke) {
+      const { startServer } = require('../src/server');
+      const { runSmoke } = require('./smoke');
+      return runSmoke({ app, BrowserWindow, startServer, uiDir: path.join(__dirname, '..', 'src', 'ui'), preload: path.join(__dirname, 'preload.js'), out: args.smokeOut || path.join(app.getPath('userData'), 'smoke-result.json'), log });
+    }
+    return createWindow();
+  }).catch((e) => fatal('Could not start the player', e));
+}
 app.on('window-all-closed', () => app.quit());
 app.on('before-quit', () => { try { if (server) server.flushSync(); } catch (_) { /* ignore */ } });

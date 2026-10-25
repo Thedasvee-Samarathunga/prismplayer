@@ -12,18 +12,26 @@ const { Library, normalizeFolders } = require('./library');
 const { feed } = require('./feeder');
 const { NativeEngine } = require('./native');
 const { Scrobbler } = require('./scrobbler');
+const { DiskCache, warmFile } = require('./cache');
+const { HeadCache } = require('./headcache');
 const { LyricsService } = require('./lyrics');
+const { RecapService, RecapError } = require('./recap');
 const { spawn } = require('child_process');
 const { JsonStore } = require('./store');
 
 const DEFAULT_SETTINGS = {
   folders: [],                 // [{path, enabled}] - the ONLY places Prism ever looks for music
   watchFolders: true,          // rescan automatically when files in those folders change
-  dynamicColors: true,
+  dynamicColors: true,         // legacy switch: false = black & white
+  appearance: { colors: 'standard', look: 'flat' },   // colors: standard | vivid | mono   look: flat | frost (always coloured from the album)
   replayGain: 'off',           // off | track | album
   rg: { preamp: 0, fallback: 0, preventClipping: true },
   output: { mode: 'web', webDeviceId: '', deviceId: '', matchRate: true, bits: 0, bufferMs: 0 },   // mode: web | exclusive | shared
   eq: { enabled: false, preamp: 0, gains: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], preset: 'Flat', autoPreamp: true },
+  cache: { prefetch: true, maxHeadMB: 1024, maxCoverMB: 256 },   // smart caching: pre-decoded track starts, cover thumbnails
+  hotkeys: {},                 // action id -> key combination ('' = unassigned); see ui/js/hotkeys.js
+  hotkeyGlobal: false,         // register the global ones system-wide (desktop app)
+  recap: { user: '' },         // Last.fm user name for the recap (defaults to the connected scrobbling account)
   lyrics: { online: true },    // look up missing / unsynced lyrics on LRCLIB (sends artist, title, album, length)
   scrobble: {
     lastfm: { enabled: false, apiKey: '', secret: '', sessionKey: '', user: '' },
@@ -98,12 +106,22 @@ async function startServer(opts) {
   const stateStore = new JsonStore(path.join(dataDir, 'state.json'), {});
   stateStore.load();
   const library = new Library(dataDir);
+  const cacheDir = path.join(dataDir, 'cache');
+  const MB = 1024 * 1024;
+  const cs0 = (settingsStore.get().cache || {});
+  const heads = new HeadCache(path.join(cacheDir, 'heads'), Math.max(16, cs0.maxHeadMB || 1024) * MB, opts.headCache || {});
+  heads.enabled = cs0.prefetch !== false;
+  const covers = new DiskCache(path.join(cacheDir, 'covers'), Math.max(16, cs0.maxCoverMB || 256) * MB);
+  const paletteStore = new JsonStore(path.join(cacheDir, 'palettes.json'), { items: {} });
+  paletteStore.load();
+  const applyCacheSettings = () => { const c = settingsStore.get().cache || {}; heads.enabled = c.prefetch !== false; heads.setMax(Math.max(16, c.maxHeadMB || 1024) * MB); covers.setMax(Math.max(16, c.maxCoverMB || 256) * MB); };
   const getSettings = () => settingsStore.get();
   const saveSettings = (patch) => {
     const next = deepMerge(settingsStore.get(), patch);
     next.folders = normalizeFolders(next.folders);
     settingsStore.set(next); settingsStore.saveNow();
     if (patch && ('folders' in patch || 'watchFolders' in patch)) applyFolders(patch && 'folders' in patch);
+    if (patch && 'cache' in patch) applyCacheSettings();
   };
   const watchOpts = { debounceMs: opts.watchDebounceMs || 3000, pollMs: opts.watchPollMs || 30000 };
   function applyFolders(rescan) {
@@ -113,7 +131,8 @@ async function startServer(opts) {
   }
   const scrobbler = new Scrobbler({ dataDir, getSettings, saveSettings, lastfmRoot: opts.lastfmRoot, lbRoot: opts.lbRoot });
   const lyrics = new LyricsService({ dataDir, getSettings, lrclibRoot: opts.lrclibRoot });
-  const native = new NativeEngine({ library, bin: opts.audioHelper });
+  const recap = new RecapService(Object.assign({ dataDir, getSettings, lastfmRoot: opts.lastfmRoot }, opts.recap || {}));
+  const native = new NativeEngine({ library, bin: opts.audioHelper, heads });
   const sseClients = new Set();
   native.on('event', (ev) => { const line = `data: ${JSON.stringify(ev)}\n\n`; for (const r of sseClients) r.write(line); });
   const streams = new Map();   // sid -> {next, close}
@@ -221,7 +240,7 @@ async function startServer(opts) {
     streams.set(sid, sess);
     res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no' });
     sess.gen = feed({
-      library, first: { id: track.id, tag: q.get('tag') || '', gain: isFinite(g) ? g : 1, startSec: Math.max(0, parseFloat(q.get('start')) || 0) },
+      library, heads, first: { id: track.id, tag: q.get('tag') || '', gain: isFinite(g) ? g : 1, startSec: Math.max(0, parseFloat(q.get('start')) || 0) },
       rateFor: () => rate, getNext: () => sess.next, takeNext: () => { const n = sess.next; sess.next = null; return n; },
     });
     res.on('close', () => { sess.closed = true; sess.gen.return().catch(() => {}); if (streams.get(sid) === sess) streams.delete(sid); });
@@ -241,28 +260,57 @@ async function startServer(opts) {
   }
 
   // --------------------------------------------------------------------------- covers
-  async function serveCover(req, res, track, size) {
+  // Covers are cached in memory (fast) and on disk (survives restarts, so a hard disk is not asked for the same picture twice).
+  const coverJobs = new Map();
+  async function coverFor(track, size) {
     let key, loader, folderFile = null;
     if (track.hasCover) {
-      key = `emb:${track.id}:${size || 0}`;
+      key = `emb|${track.id}|${track.mtime}|${track.size}|${size || 0}`;
       loader = () => ff.extractEmbeddedCover(track.path, size);
     } else {
       folderFile = await ff.findFolderCover(path.dirname(track.path));
-      if (!folderFile) return sendErr(res, 404, 'no cover');
-      if (!size) return serveFile(req, res, folderFile, IMG_MIME[path.extname(folderFile).toLowerCase()] || 'image/jpeg');
-      key = `dir:${folderFile}:${size}`;
+      if (!folderFile) return null;
+      if (!size) return { file: folderFile };
+      let st; try { st = await fs.promises.stat(folderFile); } catch (_) { return null; }
+      key = `dir|${folderFile}|${st.mtimeMs}|${st.size}|${size}`;
       loader = () => ff.scaleImageFile(folderFile, size);
     }
-    let hit = coverCache.get(key);
-    if (!hit) {
-      const buf = await loader();
-      if (!buf) return sendErr(res, 404, 'no cover');
-      hit = { buf, type: sniffImage(buf) };
+    const mem = coverCache.get(key);
+    if (mem) return mem;
+    if (coverJobs.has(key)) return coverJobs.get(key);
+    const job = (async () => {
+      let buf = await covers.get(key, 'img');
+      if (!buf) { buf = await loader(); if (buf) covers.put(key, 'img', buf).catch(() => {}); }
+      if (!buf) return null;
+      const hit = { buf, type: sniffImage(buf) };
       coverCache.set(key, hit);
       if (coverCache.size > 300) coverCache.delete(coverCache.keys().next().value);
+      return hit;
+    })().finally(() => coverJobs.delete(key));
+    coverJobs.set(key, job);
+    return job;
+  }
+  async function serveCover(req, res, track, size) {
+    const r = await coverFor(track, size);
+    if (!r) return sendErr(res, 404, 'no cover');
+    if (r.file) return serveFile(req, res, r.file, IMG_MIME[path.extname(r.file).toLowerCase()] || 'image/jpeg');
+    res.writeHead(200, { 'Content-Type': r.type, 'Content-Length': r.buf.length, 'Cache-Control': 'private, max-age=3600' });
+    res.end(r.buf);
+  }
+
+  // ---- warming: start reading the beginning of tracks that are about to be played
+  async function warmTracks(ids, { rate = 0, deep = false } = {}) {
+    let warmedN = 0, queued = 0;
+    for (const id of ids.slice(0, 4)) {
+      const t = library.get(id); if (!t || t.offline || !fs.existsSync(t.path)) continue;
+      warmFile(t.path).then((r) => { if (!r.skipped) warmedN++; }).catch(() => {});
+      if (deep && heads.enabled) {
+        const r = rate || (native.dev ? native.dev.rate : 0) || (native.caps && native.caps.length ? native.rateFor(t) : 44100);
+        heads.prefetch(t, r).catch(() => {}); queued++;
+      }
+      coverFor(t, 128).catch(() => {});                       // the cover + theme of the next track are ready too
     }
-    res.writeHead(200, { 'Content-Type': hit.type, 'Content-Length': hit.buf.length, 'Cache-Control': 'private, max-age=3600' });
-    res.end(hit.buf);
+    return { requested: Math.min(ids.length, 4), prefetching: queued };
   }
 
   // --------------------------------------------------------------------------- open containing folder
@@ -372,6 +420,50 @@ async function startServer(opts) {
         const b = await readBody(req);
         if (!library.get(b.id)) return sendErr(res, 404, 'unknown track');
         return sendJson(res, library.recordPlay(b.id, b.at));
+      }
+      case '/api/recap/state': return sendJson(res, recap.lite());
+      case '/api/recap/summary': case '/api/recap/genres': case '/api/recap/charts': {
+        try {
+          if (p.endsWith('summary')) return sendJson(res, await recap.summary(q.get('period') || 'overall'));
+          if (p.endsWith('genres')) return sendJson(res, await recap.genres(q.get('period') || 'overall'));
+          return sendJson(res, await recap.charts(q.get('weeks') || 12));
+        } catch (e) { return sendJson(res, { error: e.message, code: e.code || 0, kind: e.kind || 'api' }, e instanceof RecapError ? 400 : 500); }
+      }
+      case '/api/recap/history': return sendJson(res, { analytics: recap.analytics(), status: recap.historyStatus(), info: recap.info() });
+      case '/api/recap/status': return sendJson(res, Object.assign(recap.historyStatus(), { info: recap.info() }));
+      case '/api/recap/sync': {
+        if (req.method !== 'POST') return sendErr(res, 405, 'POST only');
+        const b = await readBody(req);
+        recap.sync({ force: !!b.force });
+        return sendJson(res, recap.historyStatus());
+      }
+      case '/api/warm': {
+        if (req.method !== 'POST') return sendErr(res, 405, 'POST only');
+        const b = await readBody(req);
+        return sendJson(res, await warmTracks(Array.isArray(b.ids) ? b.ids.filter((x) => typeof x === 'string') : [], { rate: Math.min(192000, Math.max(0, Number(b.rate) || 0)), deep: !!b.deep }));
+      }
+      case '/api/palette': {
+        const t = library.get(q.get('id') || ''); if (!t) return sendErr(res, 404, 'unknown track');
+        const k = `${t.id}|${t.mtime}|${q.get('vivid') === '1' ? 'v' : 's'}`;
+        if (req.method === 'POST') {
+          const b = await readBody(req);
+          const ok = Array.isArray(b.palette) && b.palette.length <= 16 && b.palette.every((p) => p && p.c && [p.c.r, p.c.g, p.c.b, p.w].every((n) => typeof n === 'number' && isFinite(n)));
+          if (!ok) return sendErr(res, 400, 'bad palette');
+          const items = paletteStore.get().items; items[k] = b.palette;
+          const keys = Object.keys(items); if (keys.length > 6000) for (const x of keys.slice(0, 1000)) delete items[x];
+          paletteStore.saveSoon();
+          return sendJson(res, { ok: true });
+        }
+        return sendJson(res, { palette: paletteStore.get().items[k] || null });      // null = not measured yet (a normal answer, not an error)
+      }
+      case '/api/cache/stats': return sendJson(res, { heads: heads.summary(), covers: covers.stats(), palettes: Object.keys(paletteStore.get().items).length });
+      case '/api/cache/clear': {
+        if (req.method !== 'POST') return sendErr(res, 405, 'POST only');
+        const b = await readBody(req), what = b.what || 'all';
+        if (what === 'all' || what === 'heads') heads.clear();
+        if (what === 'all' || what === 'covers') { covers.clear(); coverCache.clear(); }
+        if (what === 'all' || what === 'palettes') { paletteStore.get().items = {}; paletteStore.saveNow(); }
+        return sendJson(res, { heads: heads.summary(), covers: covers.stats(), palettes: Object.keys(paletteStore.get().items).length });
       }
       case '/api/lyrics': {
         const t = trackOr404(); if (!t) return;
@@ -488,15 +580,15 @@ async function startServer(opts) {
   if (opts.autoScan !== false) applyFolders(true); else library.watch(getSettings().folders, Object.assign({ enabled: false }, watchOpts));
 
   return {
-    port, url: baseUrl, library, scrobbler, native, lyrics, settings: { get: getSettings, save: saveSettings },
-    flushSync() { scrobbler.queue.saveNow(); lyrics.flush(); library.flush(); stateStore.saveNow(); settingsStore.saveNow(); },
+    port, url: baseUrl, library, scrobbler, native, lyrics, recap, heads, covers, settings: { get: getSettings, save: saveSettings },
+    flushSync() { scrobbler.queue.saveNow(); lyrics.flush(); recap.cache.saveNow(); recap.histStore.saveNow(); paletteStore.saveNow(); library.flush(); stateStore.saveNow(); settingsStore.saveNow(); },
     async close() {
       library.unwatch();
       for (const r of sseClients) { try { r.end(); } catch (_) { /* ignore */ } }
       for (const x of streams.values()) x.close();
       await native.close().catch(() => {});
       scrobbler.close();
-      lyrics.flush();
+      lyrics.flush(); recap.cache.saveNow(); recap.histStore.saveNow(); paletteStore.saveNow();
       library.flush();
       stateStore.saveNow();
       settingsStore.saveNow();

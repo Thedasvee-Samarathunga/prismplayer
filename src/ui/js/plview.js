@@ -2,7 +2,7 @@
 import { api } from './api.js';
 import { S, on, emit, persist, activePlaylist, getPlaylist, setActive, createPlaylist, renamePlaylist, deletePlaylist,
   removeItems, moveItems, sortPlaylist, shufflePlaylist, addToPlaylist } from './state.js';
-import { P, playItem } from './playback.js';
+import { P, playItem, warm } from './playback.js';
 import { VList } from './vlist.js';
 import { fmtTime, escapeHtml, displayArtist } from './fmt.js';
 import { ICON } from './icons.js';
@@ -83,7 +83,7 @@ function clickRow(i, e) {
     const u = items[i].u;
     if (sel.has(u)) sel.delete(u); else sel.add(u);
     anchor = focus = i;
-  } else selectOnly(i);
+  } else { selectOnly(i); warm([items[i].id], false); }
   refreshRows();
 }
 
@@ -299,9 +299,6 @@ export function initPlaylistView() {
     const ids = e.dataTransfer.getData('application/x-prism-ids');
     if (pl) { moveItems(S.activeId, JSON.parse(pl), at); }
     else if (ids) { addToPlaylist(S.activeId, JSON.parse(ids), at); }
-    else if (e.dataTransfer.files && e.dataTransfer.files.length && window.prismHost && window.prismHost.pathsFromDrop) {
-      addPathsToPlaylist(window.prismHost.pathsFromDrop(e.dataTransfer.files), at);
-    }
     dragU = null;
   });
 
@@ -327,6 +324,9 @@ export function initPlaylistView() {
 
   drawTabs(); setItems();
   return {
+    // where a drop at this pointer position would be inserted (null when the pointer is not over the queue)
+    hideDropLine() { dropLine.style.display = 'none'; },
+    dropIndexAt(e) { const r = listEl.getBoundingClientRect(); return e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom ? dropIndex(e) : null; },
     focus() { listEl.focus(); },
     selectAll() { sel = new Set(items.map((i) => i.u)); refreshRows(); },
     removeSelected, scrollToPlaying() { const i = P.cur ? items.findIndex((it) => it.u === P.cur.u) : -1; if (i >= 0) vl.scrollTo(i, 'center'); },

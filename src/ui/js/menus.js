@@ -79,7 +79,15 @@ export function mountMenuBar(host, defs) {
   let openBtn = null;
   const buttons = defs.map((d) => {
     const b = document.createElement('button');
-    b.className = 'menu-btn'; b.type = 'button'; b.textContent = d.label;
+    b.className = 'menu-btn' + (d.className ? ' ' + d.className : ''); b.type = 'button';
+    if (d.html) b.innerHTML = d.html; else b.textContent = d.label;
+    if (d.title) b.title = d.title;
+    if (d.action) {                                                   // a plain ribbon button: runs its action, no dropdown
+      b.addEventListener('click', () => { closeMenus(); d.action(); });
+      b.addEventListener('mouseenter', () => { if (openBtn) closeMenus(); });
+      host.appendChild(b);
+      return b;
+    }
     b.setAttribute('aria-haspopup', 'true');
     const show = () => {
       const r = b.getBoundingClientRect();
