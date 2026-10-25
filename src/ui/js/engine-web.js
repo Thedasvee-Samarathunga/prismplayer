@@ -34,7 +34,12 @@ export class WebEngine {
   get duration() { return this.track ? this.track.duration : 0; }
 
   // ------------------------------------------------------------------ graph
-  async ensure() {
+  // (one setup at a time: it is started at app start AND by the first play, and two overlapping setups would build two audio contexts)
+  ensure() {
+    if (this.ctx) return Promise.resolve();
+    return this._ensuring || (this._ensuring = this._ensure().finally(() => { this._ensuring = null; }));
+  }
+  async _ensure() {
     if (this.ctx) return;
     const ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'playback' });
     if (this.sinkId && ctx.setSinkId) { try { await ctx.setSinkId(this.sinkId); } catch (_) { /* device gone: use default */ } }

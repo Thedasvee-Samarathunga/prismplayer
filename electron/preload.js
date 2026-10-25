@@ -8,6 +8,8 @@ contextBridge.exposeInMainWorld('prismHost', {
   windowControl: (action) => ipcRenderer.send('win-control', String(action)),
   getWindowState: () => ipcRenderer.invoke('win-state'),
   onWindowState: (cb) => ipcRenderer.on('win-state', (_e, s) => cb(s || {})),
+  // false while the window is minimised or hidden, true again when it is shown (the page itself is never told: background throttling is off so audio keeps flowing)
+  onWindowVisible: (cb) => ipcRenderer.on('win-visible', (_e, v) => cb(!!v)),
   showItemInFolder: (p) => ipcRenderer.send('show-in-folder', p),
   // real window fullscreen (the UI also draws its own fullscreen lyrics screen)
   setFullscreen: (on) => ipcRenderer.send('fullscreen', !!on),

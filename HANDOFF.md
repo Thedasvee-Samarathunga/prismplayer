@@ -1,6 +1,6 @@
 # Prism: handoff notes (read this first when continuing the project)
 
-Prism = foobar2000-style music player, Electron (Windows), UI colours follow album art. v2.0.0.
+Prism = foobar2000-style music player, Electron (Windows), UI colours follow album art. v2.0.2 (speed patch).
 Owner prefs: casual upbeat tone; always send COMPLETE files (never snippets); builds via GitHub Actions (no local VS); former developer.
 The owner CANNOT upload zips. To continue: ask them to run the PowerShell bundler (below) in the repo folder and upload the three text files.
 
@@ -84,3 +84,20 @@ The playlist / library lists are virtual (rows are recycled), so DOM order is NO
 - The packaged Electron app itself (only a fake-electron harness + the new CI launch tests exist); real global hotkeys; real Last.fm responses; HDD speed-ups are measured with a deliberately slow ffmpeg, not a real disk.
 - Real WASAPI hardware run; real LRCLIB responses (only a mock was available); Electron real-fullscreen on a real desktop.
 - Ideas not built: per-song lyric offset, SYLT tags, crossfade, cue sheets, tag editing, Mac/Linux packaging, code signing.
+
+## 2.0.2 speed patch (read SPEEDPATCH.md for the diagnosis)
+- REMOVED from the UI: the looks glass / frost / liquid, the background blur, `liquid.js` and the `#liquid` / `#field` elements. `theme.js` `styleOf` maps a saved glass -> flat, frost -> pastel, liquid -> flat and the blur to off.
+  `color.js` (LOOKS, BLURS, fluid palettes) and `liquidsim.js` and their unit tests are LEFT IN PLACE: pure, tested, unused by the UI. Do not re-add backdrop-filter or large CSS filters: they soften text at fractional display scaling and the GPU
+  redoes them whenever anything over them animates.
+- `backdrop.js` `bakeBlur(url, {size, saturate, brightness})`: the blurred cover behind the window (32 px) and behind the fullscreen lyrics (192 px) is made once on a canvas and used as a plain image (theme.js, lyrics.js).
+- `transport.js`: ONE seek-bar loop (a 66 ms timer). It used to start a new requestAnimationFrame loop on every play-state change and every new track and none ever stopped. `lyrics.js` follower: 66 ms timer too.
+- `viz.js`: quality levels PERF smooth | balanced (default) | light (`settings.appearance.perf`), sizes from a ResizeObserver (no per-frame layout reads), nothing drawn while `S.windowHidden` (main process sends `win-visible`),
+  at most 15 fps when the window has no focus (not for 'smooth'). `vizlib.js`: every `shadowBlur` is `f.glow ? n : 0` (only 'smooth' glows).
+- `playback.js` `warm()`: the deep pre-decode of upcoming tracks waits 3 s after a track starts (and a quick series of skips prepares only the last few).
+- Server: `store.js` debounced saves are written in the background (a newer save beats an older background write); `ffmpeg.js` `lowPriority()` for tag reading, covers, loudness scans and pre-decoding; `library.js` parallel `stat`,
+  `PROBE_WORKERS`, `_signature()` so a scan or drop that changed nothing neither rewrites `library.json` nor bumps the version; `index.js` caches the `/api/library` JSON per version and memoises `/api/recap/trackstats`, first rescan 4 s after the start
+  (`scanDelayMs`); `recap.js` memoises `analytics()`, no synchronous history save every 5 pages. UI: the library list is downloaded only when `S.libVersion` differs from the server's; a 15 s check brings in changes found later.
+- Icon: `win.icon` is now `build/icon.png` (electron-builder converts it); the installer keeps `build/icon.ico` (classic bitmap, known to build and run) via `nsis.installerIcon`; `build/installer.nsh` refreshes the Windows icon cache after install;
+  the icon travels with the app (`extraResources` -> resources/icon/icon.png) and the window uses it explicitly; the workflow extracts the icon from the built Prism.exe into diagnostics/exe-icon.png and fails the run if it is blank.
+- Title under the cover is 22 px. Tests: `test/speed.test.js`, `python test/e2e_speed.py`; the browser tests for the removed looks / blur were cut from e2e_v13 / v14 / v20.
+- NOT verified: the real Windows display (fractional scaling text sharpness), real GPU load numbers, the real exe icon in Explorer / the taskbar, the NSIS installer with the new icon setup and the cache-refresh macro.

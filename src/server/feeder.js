@@ -32,13 +32,14 @@ function decoderArgs(track, startSec, rate, extraFilters) {
 }
 
 class Decoder {
-  constructor(track, startSec, rate) {
+  constructor(track, startSec, rate, { low = false } = {}) {
     this.track = track;
     this.rate = rate;
     this.frames = 0;
     this.stderr = '';
     this.t0 = Date.now(); this.firstAt = 0;                 // start-up latency: spawn -> first audio
     this.proc = spawn(ff.FFMPEG, decoderArgs(track, startSec, rate), { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    if (low) ff.lowPriority(this.proc);                       // pre-decoding the start of tracks that are coming up: never at the expense of the one playing
     this.proc.stderr.on('data', (d) => { if (this.stderr.length < 1500) this.stderr += d; });
     this.exited = new Promise((resolve) => { this.proc.on('close', (code) => resolve(code)); this.proc.on('error', () => resolve(-1)); });
   }

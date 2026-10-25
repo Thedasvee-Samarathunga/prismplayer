@@ -24,6 +24,8 @@ export const S = {
   resume: null,
   theme: null,
   scan: { scanning: false },
+  windowHidden: false,    // the desktop window is minimised (set from the main process): visualisers stop drawing
+  libVersion: 0,          // version of the library list that was last downloaded (see loadLibrary)
 };
 
 let uidSeq = 1;
@@ -126,6 +128,7 @@ window.addEventListener('pagehide', () => {
 // ------------------------------------------------------------------------------------ loading
 export async function loadLibrary() {
   const lib = await api.library();
+  S.libVersion = lib.version;
   S.tracks = new Map(lib.tracks.map((t) => [t.id, t]));
   S.list = lib.tracks;
   // drop playlist entries whose files are gone

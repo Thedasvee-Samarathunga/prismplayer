@@ -19,7 +19,6 @@ import { addFilesToPlaylist, rescan, revealTrack } from './actions.js';
 import { ORDERS } from './queue.js';
 import { resolveBindings, eventToCombo, shouldFire, actionFor, pretty, globalList } from './hotkeys.js';
 import { initDropFiles } from './dropfiles.js';
-import { initLiquid, shakeLiquid } from './liquid.js';
 import { initWindowControls } from './winctl.js';
 import { initDj, djLabel, toggleDjPanel, paintDjBadge } from './dj.js';
 import { initLfStats } from './lfstats.js';
@@ -36,14 +35,17 @@ async function watchScan() {
   watching = true;
   const st = $('st-lib');
   try {
+    let last = null;
     for (;;) {
       const s = await api.libraryStatus();
-      S.scan = s;
+      S.scan = s; last = s;
       if (!s.scanning) break;
       st.textContent = `Scanning library… ${s.processed}/${s.total || '?'}`;
       await sleep(600);
     }
     st.textContent = '';
+    // the whole library list (every field of every song) is only downloaded and rebuilt when the scan really changed something
+    if (last && last.version === S.libVersion) return;
     const before = S.list.length;
     await loadLibrary();
     if (S.list.length !== before) toast(`Library updated: ${S.list.length} tracks`, { ms: 2800 });
@@ -126,10 +128,9 @@ function menuDefs() {
       { label: 'Scroll to playing track', action: () => plView.scrollToPlaying() },
       { sep: true },
       { label: 'Colours', submenu: [['standard', 'Album colours'], ['vivid', 'Album colours: vivid'], ['mono', 'Black and white']].map(([id, l]) => ({ label: l, radio: styleOf(S.settings).colors === id, action: () => saveSettings({ appearance: { colors: id }, dynamicColors: id !== 'mono' }) })) },
-      { label: 'Look', submenu: [['flat', 'Flat'], ['pastel', 'Pastel'], ['glass', 'Frosted glass'], ['frost', 'Frosted pastel'], ['liquid', 'Liquid']].map(([id, l]) => ({ label: l, radio: styleOf(S.settings).look === id, disabled: styleOf(S.settings).colors === 'mono', action: () => saveSettings({ appearance: { look: id } }) })) },
-      { label: 'Background blur', submenu: [['off', 'Off'], ['cover', 'Mild blur with album cover'], ['colours', 'Mild blur, colours only']].map(([id, l]) => ({ label: l, radio: styleOf(S.settings).blur === id, disabled: styleOf(S.settings).colors === 'mono' || styleOf(S.settings).look === 'liquid', action: () => saveSettings({ appearance: { blur: id } }) })) },
+      { label: 'Look', submenu: [['flat', 'Flat'], ['pastel', 'Pastel']].map(([id, l]) => ({ label: l, radio: styleOf(S.settings).look === id, disabled: styleOf(S.settings).colors === 'mono', action: () => saveSettings({ appearance: { look: id } }) })) },
       { label: 'Square corners', checked: !!styleOf(S.settings).square, action: () => saveSettings({ appearance: { square: !styleOf(S.settings).square } }) },
-      { label: 'Shake the liquid', disabled: styleOf(S.settings).look !== 'liquid' || styleOf(S.settings).colors === 'mono', action: () => shakeLiquid() },
+      { label: 'Visualiser quality', submenu: [['smooth', 'Smooth (60 fps, glow)'], ['balanced', 'Balanced (30 fps)'], ['light', 'Light (20 fps, lowest load)']].map(([id, l]) => ({ label: l, radio: styleOf(S.settings).perf === id, action: () => saveSettings({ appearance: { perf: id } }) })) },
     ] },
     { label: 'Playback', items: () => [
       { label: P.state === 'playing' ? 'Pause' : 'Play', key: 'Space', action: toggle },
@@ -227,11 +228,14 @@ async function boot() {
   const health = await api.get('/api/health').catch(() => ({ ffmpeg: false }));
 
   await engine.useOutput(S.settings.output);
+  // the browser output builds its audio graph (context + worklet) on first use: do that now, so the first press of Play does not wait for it
+  { const im = engine.impl; if (im && typeof im.ensure === 'function') im.ensure().catch(() => {}); }
+  // minimised window (desktop app): nothing animated needs to be drawn
+  if (window.prismHost && typeof window.prismHost.onWindowVisible === 'function') window.prismHost.onWindowVisible((v) => { S.windowHidden = !v; if (v) emit('layout'); });
   applyEq();
   applyLayout();
   initTheme();
   initViz();
-  initLiquid();
   initWindowControls();
   libView = initLibraryView();
   plView = initPlaylistView();
@@ -283,6 +287,15 @@ async function boot() {
   const st = await api.libraryStatus().catch(() => null);
   if (st && st.scanning) watchScan();
   else if (!(S.settings.folders || []).length && !S.list.length) openSettings();
+  // The server looks at the folders again a few seconds after the start, and again whenever its folder watcher sees a change. A small question every 15 seconds
+  // ("did the library change?") brings the result into the window, and only then is the whole list downloaded.
+  setInterval(async () => {
+    if (watching || document.hidden || S.windowHidden) return;
+    const s = await api.libraryStatus().catch(() => null);
+    if (!s) return;
+    if (s.scanning) watchScan();
+    else if (s.version !== S.libVersion) { const before = S.list.length; await loadLibrary(); if (S.list.length !== before) toast(`Library updated: ${S.list.length} tracks`, { ms: 2800 }); }
+  }, 15000);
 }
 
 boot();

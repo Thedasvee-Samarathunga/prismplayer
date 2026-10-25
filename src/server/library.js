@@ -5,6 +5,7 @@
 //  * a folder that is currently unreachable (unplugged USB drive, disconnected network share) keeps its tracks and is
 //    shown as offline, instead of wiping them from the library
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const ff = require('./ffmpeg');
 const cue = require('./cue');
@@ -12,6 +13,15 @@ const { JsonStore } = require('./store');
 
 const SKIP_DIRS = new Set(['$recycle.bin', 'system volume information', 'node_modules', '.git']);
 const norm = (p) => path.resolve(p);
+// runs fn over items with at most `limit` running at once; results keep the order of the items
+async function mapLimit(items, limit, fn) {
+  const out = new Array(items.length);
+  let next = 0;
+  const worker = async () => { for (;;) { const i = next++; if (i >= items.length) return; out[i] = await fn(items[i], i); } };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return out;
+}
+const PROBE_WORKERS = () => { const n = (os.availableParallelism ? os.availableParallelism() : (os.cpus() || []).length) || 4; return Math.max(3, Math.min(6, n - 2)); };
 const sameDirOrInside = (file, dir) => { const rel = path.relative(dir, file); return rel && !rel.startsWith('..') && !path.isAbsolute(rel); };
 
 // accepts the old format (array of strings) and the new one (array of {path, enabled})
@@ -55,6 +65,16 @@ class Library {
     for (const t of this.tracks.values()) tracks[t.id] = t;
     this.db.set({ v: 1, tracks });
     this.version++;
+  }
+
+  // A cheap number that changes when the library content changes (tracks added / removed / edited, offline flags, cue sheets). A scan that finds the
+  // same library as before does not rewrite the library file and does not bump the version, so the interface does not download and rebuild everything again.
+  _signature() {
+    let h = this.tracks.size;
+    for (const t of this.tracks.values()) {
+      h = (h * 31 + (t.mtime || 0) + (t.size || 0) % 9973 + (t.offline ? 7 : 0) + (t.hidden ? 13 : 0) + (t.cueMtime || 0) + Math.round((t.cueStart || 0) * 1000) + (t.root || '').length * 3 + (t.title || '').length * 5 + (t.extra ? 17 : 0) + t.id.charCodeAt(0) + t.id.charCodeAt(5)) % 1000000007;
+    }
+    return h;
   }
 
   // ---- statistics ------------------------------------------------------------------------
@@ -110,23 +130,29 @@ class Library {
     const todo = [];
     const roots = [];
     const cues = [];            // {file, root}
+    const sig0 = this._signature();
     try {
       for (const f of folders) {
         const online = f.enabled ? await this._online(f.path) : true;
         roots.push({ path: f.path, enabled: f.enabled, online, tracks: 0 });
         if (!f.enabled || !online) continue;
+        const found = [];
         for await (const file of this._walk(f.path)) {
           const id = ff.trackId(file);
           if (seen.has(id)) continue;                      // folder inside another chosen folder
           if (ff.isCueFile(file)) { seen.add(id); cues.push({ file, root: f.path }); continue; }
           seen.add(id);
           st.found++;
-          let stat;
-          try { stat = await fs.promises.stat(file); } catch (_) { continue; }
-          const old = this.tracks.get(id);
-          if (old && old.mtime === Math.floor(stat.mtimeMs) && old.size === stat.size && old.rgTrackPeak !== undefined) { old.root = f.path; old.extra = false; continue; }
-          todo.push({ file, root: f.path });
+          found.push({ file, id });
         }
+        // looking at the files (size and date) in parallel: one after the other, a big library on a hard disk spent most of a rescan just waiting
+        const stats = await mapLimit(found, 24, async (e) => { try { return await fs.promises.stat(e.file); } catch (_) { return null; } });
+        found.forEach((e, k) => {
+          const stat = stats[k]; if (!stat) return;
+          const old = this.tracks.get(e.id);
+          if (old && old.mtime === Math.floor(stat.mtimeMs) && old.size === stat.size && old.rgTrackPeak !== undefined) { old.root = f.path; old.extra = false; return; }
+          todo.push({ file: e.file, root: f.path });
+        });
       }
       st.total = todo.length;
 
@@ -147,7 +173,7 @@ class Library {
           st.processed++;
         }
       };
-      await Promise.all(Array.from({ length: 4 }, worker));
+      await Promise.all(Array.from({ length: PROBE_WORKERS() }, worker));
 
       // ---- cue sheets: their tracks replace the whole-file entry of the audio they describe
       const claimed = new Set();
@@ -182,7 +208,7 @@ class Library {
       for (const t of this.tracks.values()) if (seen.has(t.id)) t.offline = false;
       for (const t of this.tracks.values()) { if (t.hidden) continue; const r = t.root && byPath.get(t.root); if (r) r.tracks++; }
       st.roots = roots;
-      this._persist();
+      if (this._signature() !== sig0) this._persist();           // a scan that found the same library does not rewrite the library file or bump its version
     } finally {
       st.scanning = false;
       st.finishedAt = Date.now();
@@ -301,6 +327,7 @@ class Library {
 
   // ---- files added by hand (drag & drop, "Add files") -----------------------------------
   async addPaths(paths) {
+    const sig0 = this._signature();
     const files = [], cueFiles = [];
     for (const p of paths) {
       let stat;
@@ -333,7 +360,7 @@ class Library {
       try { const r = await this._cueTracks(cf, null, true); r.parents.forEach((id) => claimed.add(id)); r.tracks.forEach((t) => entries.push({ t, rank: files.length + cueFiles.indexOf(cf) })); } catch (_) { /* unreadable cue */ }
     }
     for (const t of out) if (!claimed.has(t.id)) entries.push({ t, rank: order.has(t.id) ? order.get(t.id) : 1e9 });
-    if (entries.length || claimed.size) this._persist();
+    if (this._signature() !== sig0) this._persist();                  // dropping songs the library already knows changes nothing
     entries.sort((a, b) => (a.rank - b.rank) || ((a.t.disc || 0) - (b.t.disc || 0)) || ((a.t.track || 0) - (b.t.track || 0)));
     return entries.map((e) => e.t);
   }

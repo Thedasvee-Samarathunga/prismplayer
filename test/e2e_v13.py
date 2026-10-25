@@ -223,16 +223,16 @@ def run():
         # ================================================================== appearance
         print("appearance: modes x looks on real pixels")
         covers = [("Ember", "red"), ("White Out (96k/24)", "near-white"), ("Nothing (mono)", "near-black"), ("Endurance", "gold"), ("One Bit Wonder", "purple")]
-        combos = [("standard", "flat"), ("vivid", "flat"), ("standard", "frost"), ("vivid", "frost"), ("mono", "flat")]
+        combos = [("standard", "flat"), ("vivid", "flat"), ("standard", "pastel"), ("vivid", "pastel"), ("mono", "flat")]
         play(pg, "Ember"); pg.click("#menubar >> text=File"); pg.click(".menu-item:has-text('Settings')"); pg.wait_for_selector(".tabs-inline")
         pg.click(".tabs-inline .tab:has-text('Appearance')"); pg.wait_for_selector("input[name=ap-colors]")
-        check("Appearance settings: 3 colour choices, 5 looks (flat, pastel, frosted glass, frosted pastel, liquid)", pg.locator("input[name=ap-colors]").count() == 3 and pg.locator("input[name=ap-look]").count() == 5)
+        check("Appearance settings: 3 colour choices, 2 looks (flat, pastel; the glass / frosted / liquid looks were removed in 2.0.2)", pg.locator("input[name=ap-colors]").count() == 3 and pg.locator("input[name=ap-look]").count() == 2)
         pg.locator("label.choice:has(input[value=vivid])").click(); pg.wait_for_timeout(1500)
         check("choosing 'vivid' applies at once", pg.evaluate("document.documentElement.dataset.colors") == "vivid")
-        pg.locator("label.choice:has(input[value=frost])").click(); pg.wait_for_timeout(1500)
-        check("choosing 'frosted' applies at once", pg.evaluate("document.documentElement.dataset.look") == "frost")
+        pg.locator("label.choice:has(input[value=pastel])").click(); pg.wait_for_timeout(1500)
+        check("choosing 'pastel' applies at once", pg.evaluate("document.documentElement.dataset.look") == "pastel")
         pg.locator("label.choice:has(input[value=mono])").click(); pg.wait_for_timeout(1200)
-        check("black & white is always flat (the look choices are disabled)", pg.evaluate("document.documentElement.dataset.look") == "flat" and pg.locator("#ap-looks .choice.disabled").count() == 5)
+        check("black & white is always flat (the look choices are disabled)", pg.evaluate("document.documentElement.dataset.look") == "flat" and pg.locator("#ap-looks .choice.disabled").count() == 2)
         pg.screenshot(path=f"{OUT}/44-appearance-settings.png")
         pg.locator("label.choice:has(input[value=standard])").click(); pg.wait_for_timeout(600); pg.keyboard.press("Escape"); pg.wait_for_timeout(300)
         shots = {}
@@ -248,17 +248,17 @@ def run():
                 w = pixels_worst(pg, cols)
                 check(f"   {colors}/{look} '{label}' cover: text {w['fg']:.1f}:1  dim {w['dim']:.1f}:1  accent {w['accent']:.1f}:1", all(x >= 4.5 for x in w.values()) and ok_attr, f"{w} {st}")
                 if label == "red": shots[(colors, look)] = f"{OUT}/45-{colors}-{look}.png"; pg.screenshot(path=shots[(colors, look)])
-        print("appearance: frost specifics")
-        set_settings(pg, {"appearance": {"colors": "standard", "look": "frost"}, "dynamicColors": True}); play(pg, "Ember"); pg.wait_for_timeout(1200)
-        css = pg.evaluate("(() => { const c = getComputedStyle(document.querySelector('#pl')); return {bf: c.backdropFilter || c.webkitBackdropFilter, bg: c.backgroundColor}; })()")
-        check("frosted panels blur what is behind them and are translucent", "blur" in css["bf"] and css["bg"].startswith("rgba("), str(css))
+        print("appearance: pastel specifics")
+        set_settings(pg, {"appearance": {"colors": "standard", "look": "pastel"}, "dynamicColors": True}); play(pg, "Ember"); pg.wait_for_timeout(1200)
+        css = pg.evaluate("(() => { const c = getComputedStyle(document.querySelector('#pl')); return {bf: c.backdropFilter || c.webkitBackdropFilter || 'none', bg: c.backgroundColor}; })()")
+        check("pastel panels are solid (no blur, no see-through)", css["bf"] == "none" and css["bg"].startswith("rgb("), str(css))
         light = pg.evaluate("(() => { const m = (getComputedStyle(document.documentElement).getPropertyValue('--panel') || '').trim(); const n = parseInt(m.slice(1), 16); return ((n >> 16) & 255) + ((n >> 8) & 255) + (n & 255); })()")
-        check("frosted is a light pastel theme", light > 600, str(light))
+        check("pastel is a light theme", light > 600, str(light))
         set_settings(pg, {"appearance": {"colors": "standard", "look": "flat"}}); play(pg, "Ember"); pg.wait_for_timeout(1200)
         css = pg.evaluate("(() => { const c = getComputedStyle(document.querySelector('#pl')); return c.backdropFilter || 'none'; })()")
         check("flat panels have no blur", css in ("none", "") or "blur(0px)" in css, css)
-        print("appearance: menus, dialogs and lyrics over the glass")
-        for colors, look in (("standard", "frost"), ("vivid", "frost"), ("vivid", "flat")):
+        print("appearance: menus, dialogs and lyrics over the solid looks")
+        for colors, look in (("standard", "pastel"), ("vivid", "pastel"), ("vivid", "flat")):
             set_settings(pg, {"appearance": {"colors": colors, "look": look}, "dynamicColors": True})
             for title in ("Ember", "White Out (96k/24)", "Nothing (mono)"):
                 play(pg, title, 0.4); pg.wait_for_timeout(1400)
@@ -276,7 +276,7 @@ def run():
             pg.keyboard.press("f"); pg.wait_for_selector("#fs:not([hidden])"); pg.wait_for_timeout(1200)
             bx = pg.locator("#fs-lyrics").bounding_box(); bx["width"] *= 0.66; bx["y"] += bx["height"] * 0.18; bx["height"] *= 0.64
             w = pixels_worst(pg, cols, "", 5, bx, text_boxes=False)
-            if look == "frost": pg.screenshot(path=f"{OUT}/46-fullscreen-{colors}-{look}.png")
+            if look == "pastel": pg.screenshot(path=f"{OUT}/46-fullscreen-{colors}-{look}.png")
             check(f"   {colors}/{look}: fullscreen lyrics {w['fg']:.1f}:1 / {w['dim']:.1f}:1", min(w.values()) >= 4.5, str(w))
             pg.keyboard.press("Escape"); pg.wait_for_timeout(300); pg.keyboard.press("l"); pg.wait_for_timeout(300)
         print("appearance: vivid draws several shades")
@@ -400,7 +400,9 @@ def run():
         calls = []
         pg.on("request", lambda rq: calls.append(rq.url) if "/api/warm" in rq.url else None)
         pg.evaluate("import('/js/playback.js').then(m => m.playIndex(window.__prism.S.activeId, 0))"); pg.wait_for_timeout(1500)
-        check("while a track plays the next ones are warmed (asked of the server)", len(calls) >= 1, str(calls))
+        check("pressing play does not start the pre-decoding of the next tracks at once (it would compete with the track that is starting)", len(calls) == 0, str(calls))
+        pg.wait_for_timeout(2600)
+        check("while a track plays the next ones are warmed (asked of the server, a few seconds after the start)", len(calls) >= 1, str(calls))
         check("no console or page errors during the whole run", errs == [], str(errs[:5]))
         b.close()
 

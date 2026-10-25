@@ -120,8 +120,16 @@ export function warm(ids, deep) {
   for (const id of fresh) warmedAt.set(id + (deep ? 'd' : 'f'), now);
   if (warmedAt.size > 500) warmedAt.delete(warmedAt.keys().next().value);
   const impl = engine.impl, rate = impl && impl.kind === 'web' && impl.ctx ? impl.ctx.sampleRate : 0;
-  api.warm(fresh, deep, rate);
+  if (!deep) { api.warm(fresh, false, rate); return; }                        // reading a file you just selected: do it now
+  // Pre-decoding the NEXT tracks starts one ffmpeg per track and reads their files. Done at the very moment a track starts it competes with that
+  // track for the disk and the CPU (a visible wait on hard disks), so it waits until the new track has been playing for a moment, and a quick
+  // series of skips only prepares the last few tracks.
+  deepIds = fresh.concat(deepIds.filter((x) => !fresh.includes(x))).slice(0, 4); deepRate = rate;
+  clearTimeout(deepTimer);
+  deepTimer = setTimeout(() => { const batch = deepIds; deepIds = []; if (batch.length) api.warm(batch, true, deepRate); }, WARM_DELAY_MS);
 }
+let deepTimer = 0, deepIds = [], deepRate = 0;
+const WARM_DELAY_MS = 3000;
 function warmUpcoming() {
   if (!P.cur || S.settings.cache && S.settings.cache.prefetch === false || S.order === 'shuffle') return;
   const list = items(P.cur.pid), i = list.findIndex((x) => x.u === P.cur.u);

@@ -321,31 +321,22 @@ export function settingsDialog({ onFoldersChanged, tab: startTab } = {}) {
         <label class="choice"><input type="radio" name="ap-colors" value="mono"><div class="swatch"><i style="background:#000"></i><i style="background:#3a3a3a"></i><i style="background:#fff"></i></div><b>Black and white</b><span>Flat black, white and grey. Ignores the cover.</span></label>
       </div>
       <div class="field" style="margin-top:20px"><span class="lab">Look</span></div>
-      <div class="choice-row" role="radiogroup" aria-label="Look" id="ap-looks">
+      <div class="choice-row two" role="radiogroup" aria-label="Look" id="ap-looks">
         <label class="choice"><input type="radio" name="ap-look" value="flat"><b>Flat</b><span>Solid dark panels.</span></label>
         <label class="choice"><input type="radio" name="ap-look" value="pastel"><b>Pastel</b><span>Soft, light, solid panels tinted with the album's colours.</span></label>
-        <label class="choice"><input type="radio" name="ap-look" value="glass"><b>Frosted glass</b><span>Dark glass that blurs the album art behind it.</span></label>
-        <label class="choice"><input type="radio" name="ap-look" value="frost"><b>Frosted pastel</b><span>Light, soft-coloured glass over the blurred album art.</span></label>
-        <label class="choice"><input type="radio" name="ap-look" value="liquid"><b>Liquid</b><span>Dark glass over a fluid in the album's colours. Shake the window, or shake the mouse, and it sloshes. It also ripples to the bass.</span></label>
       </div>
       <p class="note" id="ap-note"></p>
-      <div class="field" style="margin-top:20px"><span class="lab">Background blur</span></div>
-      <div class="choice-row" role="radiogroup" aria-label="Background blur" id="ap-blurs">
-        <label class="choice"><input type="radio" name="ap-blur" value="off"><b>Off</b><span>The look exactly as it is.</span></label>
-        <label class="choice"><input type="radio" name="ap-blur" value="cover"><b>Mild blur with album cover</b><span>The cover shows behind everything, only lightly blurred, and the panels turn into see-through glass.</span></label>
-        <label class="choice"><input type="radio" name="ap-blur" value="colours"><b>Mild blur, colours only</b><span>The same glass over a soft field of the album's colours, without the picture.</span></label>
-      </div>
-      <p class="note" id="ap-blur-note"></p>
       <div class="field" style="margin-top:20px"><span class="lab">Shape and layout</span></div>
       <label class="check"><input type="checkbox" id="ap-square"> Square corners (no rounded borders on any element)</label>
       <label class="check"><input type="checkbox" id="ap-sidefull"> Show a visualiser under the Now playing panel</label>
       <p class="note">Switch the second one off and the Now playing panel stretches the whole height of the window; the visualisers then sit under the library and the queue only.</p>
       <div class="field" style="margin-top:20px"><span class="lab">Visualisers</span></div>
       <div class="field"><label for="ap-vcount">Number of visualisers (1 to 6)</label><select id="ap-vcount">${[1, 2, 3, 4, 5, 6].map((n) => `<option value="${n}">${n}</option>`).join('')}</select></div>
+      <div class="field"><label for="ap-perf">Visualiser quality</label><select id="ap-perf"><option value="smooth">Smooth: 60 frames a second, glowing bars (uses the most power)</option><option value="balanced">Balanced: 30 frames a second, no glow (recommended)</option><option value="light">Light: 20 frames a second, lowest load</option></select></div>
       <label class="check"><input type="checkbox" id="ap-vtop"> Show the visualisers at the top of the window</label>
       <div style="display:flex;gap:10px;margin:8px 0"><button class="btn" id="ap-vreset" type="button">Reset visualiser sizes</button></div>
       <p class="note">Right-click a visualiser to change what it shows, to add one (6 at most) or to remove it. Drag the line between two visualisers to change their widths, the small bar on a visualiser's edge to change its height, and the edge of the whole row to change all heights. Double-click any of them to reset.</p>
-      <p class="note">Text is always kept readable: every colour is checked against the glass, the blurred cover or the fluid behind it. Lyrics and the visualisers always use light-on-dark colours of their own.</p>`;
+      <p class="note">Text is always kept readable: every colour is checked against the soft album picture behind the window. Lyrics and the visualisers always use light-on-dark colours of their own.</p>`;
     const q = (s) => pane.querySelector(s);
     const paint = () => {
       const st = styleOf(S.settings);
@@ -353,20 +344,16 @@ export function settingsDialog({ onFoldersChanged, tab: startTab } = {}) {
       pane.querySelectorAll('input[name=ap-look]').forEach((r) => { r.checked = r.value === st.look; });
       q('#ap-looks').querySelectorAll('.choice').forEach((c) => c.classList.toggle('disabled', st.colors === 'mono'));
       q('#ap-note').textContent = st.colors === 'mono' ? 'Black and white is always flat.' : '';
-      pane.querySelectorAll('input[name=ap-blur]').forEach((r) => { r.checked = r.value === st.blur; });
-      const blurOff = st.colors === 'mono' || st.look === 'liquid';
-      q('#ap-blurs').querySelectorAll('.choice').forEach((c) => c.classList.toggle('disabled', blurOff));
-      q('#ap-blur-note').textContent = st.colors === 'mono' ? 'Black and white is always flat, so there is nothing to blur.' : st.look === 'liquid' ? 'The Liquid look has its own moving background.' : (st.look === 'glass' || st.look === 'frost') ? 'Glass looks are see-through already: this sets how much of the cover shows and how sharp it is.' : '';
       q('#ap-square').checked = !!st.square;
       q('#ap-sidefull').checked = !S.layout.sideFull; q('#ap-sidefull').disabled = !!S.layout.hideViz;
-      q('#ap-vcount').value = String(S.layout.viz.length); q('#ap-vtop').checked = !!S.layout.vizTop;
+      q('#ap-vcount').value = String(S.layout.viz.length); q('#ap-vtop').checked = !!S.layout.vizTop; q('#ap-perf').value = st.perf;
     };
     paint();
     pane.querySelectorAll('input[name=ap-colors]').forEach((r) => r.addEventListener('change', async () => {
       await saveSettings({ appearance: { colors: r.value }, dynamicColors: r.value !== 'mono' }); paint();
     }));
     pane.querySelectorAll('input[name=ap-look]').forEach((r) => r.addEventListener('change', async () => { await saveSettings({ appearance: { look: r.value } }); paint(); }));
-    pane.querySelectorAll('input[name=ap-blur]').forEach((r) => r.addEventListener('change', async () => { await saveSettings({ appearance: { blur: r.value } }); paint(); }));
+    q('#ap-perf').addEventListener('change', async (e) => { await saveSettings({ appearance: { perf: e.target.value } }); paint(); });
     q('#ap-square').addEventListener('change', async (e) => { await saveSettings({ appearance: { square: e.target.checked } }); paint(); });
     q('#ap-vcount').addEventListener('change', (e) => { vizApi.setCount(Number(e.target.value)); paint(); });
     q('#ap-vtop').addEventListener('change', (e) => { vizApi.setTop(e.target.checked); paint(); });

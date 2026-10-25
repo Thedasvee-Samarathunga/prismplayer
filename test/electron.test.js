@@ -161,16 +161,30 @@ test('taskbar identity: the app id matches the installer (so the taskbar groups 
   assert.equal(f.calls.appId, 'com.prism.player'); assert.equal(f.calls.appId, pkg.build.appId, 'same id as electron-builder uses');
   const w = f.calls.windows[0];
   assert.ok(typeof w.opts.icon === 'string' && /build[\\/]icon\.(ico|png)$/.test(w.opts.icon), 'the dev run shows the icon in the window: ' + w.opts.icon);
-  assert.equal(pkg.build.win.icon, 'build/icon.ico');
+  // the program (exe, shortcuts, taskbar) gets its icon from the PNG, converted by electron-builder in the standard way; the installer keeps the classic-bitmap .ico
+  assert.equal(pkg.build.win.icon, 'build/icon.png');
+  assert.equal(pkg.build.nsis.installerIcon, 'build/icon.ico'); assert.equal(pkg.build.nsis.uninstallerIcon, 'build/icon.ico');
   const fs = require('fs'), path = require('path');
+  const png = fs.readFileSync(path.join(__dirname, '..', 'build', 'icon.png'));
+  assert.equal(png.readUInt32BE(0), 0x89504e47, 'a real PNG'); assert.ok(png.readUInt32BE(16) >= 256 && png.readUInt32BE(20) >= 256, 'at least 256 px, as electron-builder requires');
+  assert.ok(pkg.build.extraResources.some((r) => r.from === 'build' && r.to === 'icon' && r.filter.includes('icon.png')), 'the icon travels with the packaged app (the build folder is not inside it), so the window can use it');
   const ico = fs.readFileSync(path.join(__dirname, '..', 'build', 'icon.ico'));
   assert.deepEqual([ico[0], ico[1], ico[2], ico[3]], [0, 0, 1, 0], 'a real .ico file');
   const n = ico.readUInt16LE(4), sizes = []; for (let i = 0; i < n; i++) sizes.push(ico[6 + i * 16] || 256);
-  for (const need of [16, 24, 32, 48, 64, 256]) assert.ok(sizes.includes(need), 'the .ico has a ' + need + ' px picture (taskbar, alt-tab, explorer): ' + sizes);
-  const png = fs.readFileSync(path.join(__dirname, '..', 'build', 'icon.png'));
-  assert.equal(png.readUInt32BE(16), 512); assert.equal(png.readUInt32BE(20), 512);
+  for (const need of [16, 24, 32, 48, 64, 256]) assert.ok(sizes.includes(need), 'the .ico has a ' + need + ' px picture: ' + sizes);
+  assert.match(fs.readFileSync(path.join(__dirname, '..', 'build', 'installer.nsh'), 'utf8'), /customInstall[\s\S]*SHChangeNotify/, 'the installer refreshes the Windows icon cache');
 });
-
+test('window visibility: the page is told when the window is minimised or shown again (so the visualisers can stop drawing), and nothing else is touched', async () => {
+  const f = await launch(tmp('vis'));
+  const w = f.calls.windows[0], sent = [];
+  w.webContents.send = (ch, v) => sent.push([ch, v]);
+  w.emit('minimize'); w.emit('restore'); w.emit('hide'); w.emit('show');
+  assert.deepEqual(sent.filter(([c]) => c === 'win-visible').map(([, v]) => v), [false, true, false, true]);
+  w.destroyed = true;
+  assert.doesNotThrow(() => w.emit('minimize'), 'a destroyed window never throws');
+  const pre = fs.readFileSync(path.join(__dirname, '..', 'electron', 'preload.js'), 'utf8');
+  assert.match(pre, /onWindowVisible[\s\S]*win-visible/);
+});
 test('self-test (--smoke-test): checks server, bundled tools, real decode + stream, window; writes the result and exits 0', async () => {
   const out = path.join(tmp('smoke'), 'result.json');
   const f = await launch(tmp('ud9'), { argv: ['--smoke-test', `--smoke-out=${out}`], wait: 8000 });

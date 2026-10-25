@@ -23,7 +23,7 @@ const DEFAULT_SETTINGS = {
   folders: [],                 // [{path, enabled}] - the ONLY places Prism ever looks for music
   watchFolders: true,          // rescan automatically when files in those folders change
   dynamicColors: true,         // legacy switch: false = black & white
-  appearance: { colors: 'standard', look: 'flat' },   // colors: standard | vivid | mono   look: flat | frost (always coloured from the album)
+  appearance: { colors: 'standard', look: 'flat', perf: 'balanced' },   // colors: standard | vivid | mono   look: flat | pastel (solid, always coloured from the album)   perf: visualiser quality smooth | balanced | light
   replayGain: 'off',           // off | track | album
   rg: { preamp: 0, fallback: 0, preventClipping: true },
   output: { mode: 'web', webDeviceId: '', deviceId: '', matchRate: true, bits: 0, bufferMs: 0 },   // mode: web | exclusive | shared
@@ -66,6 +66,11 @@ function sendJson(res, obj, status = 200) {
   const body = Buffer.from(JSON.stringify(obj));
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Content-Length': body.length, 'Cache-Control': 'no-store' });
   res.end(body);
+}
+function sendRaw(res, body) {                       // an answer that was already turned into JSON text (kept between requests)
+  const buf = Buffer.isBuffer(body) ? body : Buffer.from(body);
+  res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Content-Length': buf.length, 'Cache-Control': 'no-store' });
+  res.end(buf);
 }
 function sendErr(res, status, msg) { sendJson(res, { error: msg }, status); }
 
@@ -139,6 +144,7 @@ async function startServer(opts) {
   const sseClients = new Set();
   native.on('event', (ev) => { const line = `data: ${JSON.stringify(ev)}\n\n`; for (const r of sseClients) r.write(line); });
   const streams = new Map();   // sid -> {next, close}
+  let libJson = null, tsMemo = { key: '', body: null };
   const coverCache = new Map(); // key -> {buf, type}
   let allowedHosts = new Set();
 
@@ -404,8 +410,11 @@ async function startServer(opts) {
 
     switch (p) {
       case '/api/health': return sendJson(res, { ok: true, ffmpeg: await ff.binariesOk(), version: 1 });
-      case '/api/library':
-        return sendJson(res, { version: library.version, tracks: library.list() });
+      case '/api/library': {
+        // Turning a big library into JSON takes long enough to stall the audio stream that runs on this same thread, so it is done once per version of the library
+        if (!libJson || libJson.version !== library.version) libJson = { version: library.version, body: Buffer.from(JSON.stringify({ version: library.version, tracks: library.list() })) };
+        return sendRaw(res, libJson.body);
+      }
       case '/api/library/status':
         return sendJson(res, Object.assign({ version: library.version }, library.status));
       case '/api/library/scan': {
@@ -425,7 +434,12 @@ async function startServer(opts) {
         return sendJson(res, library.recordPlay(b.id, b.at));
       }
       case '/api/recap/state': return sendJson(res, recap.lite());
-      case '/api/recap/trackstats': return sendJson(res, recap.trackStats(library.list()));     // play count / first / last played of every library song, from Last.fm
+      case '/api/recap/trackstats': {     // play count / first / last played of every library song, from Last.fm
+        // matching every song of the library against the history is real work: it is redone only when the library or the history changed
+        const h = recap.hist, k = [library.version, h.total, h.newestTs, h.updatedAt, h.full ? 1 : 0, h.tracksIndexed ? 1 : 0, recap.status.running ? 1 : 0, recap.user(), recap.apiKey() ? 1 : 0].join('|');
+        if (tsMemo.key !== k) tsMemo = { key: k, body: Buffer.from(JSON.stringify(recap.trackStats(library.list()))) };
+        return sendRaw(res, tsMemo.body);
+      }
       case '/api/recap/summary': case '/api/recap/genres': case '/api/recap/charts': {
         try {
           if (p.endsWith('summary')) return sendJson(res, await recap.summary(q.get('period') || 'overall'));
@@ -581,7 +595,11 @@ async function startServer(opts) {
   const baseUrl = `http://127.0.0.1:${port}`;
 
   // first run: rescan quickly in the background if folders are configured
-  if (opts.autoScan !== false) applyFolders(true); else library.watch(getSettings().folders, Object.assign({ enabled: false }, watchOpts));
+  // A library that is already known is looked at again a few seconds after the start, not at the very moment the first song may be starting.
+  if (opts.autoScan !== false) {
+    if (library.list().length && opts.scanDelayMs !== 0) { library.watch(getSettings().folders, Object.assign({ enabled: false }, watchOpts)); const t = setTimeout(() => applyFolders(true), opts.scanDelayMs == null ? 4000 : opts.scanDelayMs); if (t.unref) t.unref(); }
+    else applyFolders(true);
+  } else library.watch(getSettings().folders, Object.assign({ enabled: false }, watchOpts));
 
   return {
     port, url: baseUrl, library, scrobbler, native, lyrics, recap, heads, covers, settings: { get: getSettings, save: saveSettings },

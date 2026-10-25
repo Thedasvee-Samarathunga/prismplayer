@@ -3,7 +3,7 @@
  * cue sheets: an album in the library, gapless between its tracks, a cue dropped from outside, the info panel
  * play count / first / last played from Last.fm (mock server with an invented history), and the fallback without Last.fm
  * the Last.fm recap summary of every time frame
- * background blur (with cover / colours only): contrast on REAL pixels, translucency, the right layers
+ * (the background blur was removed in 2.0.2: see test/e2e_speed.py)
  * 1-6 visualisers: add, remove, top / bottom, drag widths and heights, persistence
  * the DJ: ribbon button after Recap, genre / whole library, style, crossfade, endless queue, start / stop
  * the new icon
@@ -197,43 +197,6 @@ def run(P):
         pg.click("#rc-periods .tab[data-p='1month']"); pg.wait_for_timeout(1500)
         pg.screenshot(path=f"{OUT}/83-recap-summary.png")
         pg.keyboard.press("Escape"); pg.wait_for_timeout(300)
-
-        # ================================================================== background blur
-        print("background blur")
-        pg.evaluate("document.querySelector('.menu') && document.querySelector('.menu').remove()")
-        play(pg, "Ember", 0.5)
-        panel_alpha = lambda: pg.evaluate("(() => { const c = getComputedStyle(document.getElementById('lib')).backgroundColor; const m = /rgba?\\(([^)]*)\\)/.exec(c)[1].split(',').map(Number); return m.length > 3 ? m[3] : 1; })()")
-        check("blur off (default): solid panels and the usual very blurred cover", panel_alpha() == 1 and pg.evaluate("document.documentElement.dataset.blur") == "off" and "blur(70px)" in pg.evaluate("getComputedStyle(document.querySelector('#backdrop .layer')).filter"))
-        for lk in ["flat", "pastel"]:
-            appearance(pg, lk, "standard", "cover")
-            a = panel_alpha(); f = pg.evaluate("getComputedStyle(document.querySelector('#backdrop .layer')).filter"); bf = pg.evaluate("getComputedStyle(document.getElementById('lib')).backdropFilter")
-            check(f"   {lk} + mild blur with cover: panels are see-through ({a}), the cover is only mildly blurred, panels blur what is behind them ({bf[:22]})", 0.7 < a < 0.9 and "blur(22px)" in f and "blur(10px)" in bf and pg.evaluate("document.documentElement.dataset.blur") == "cover", f"{a} {f} {bf}")
-            pg.screenshot(path=f"{OUT}/84-blur-cover-{lk}.png")
-            appearance(pg, lk, "standard", "colours")
-            fshow = pg.evaluate("[getComputedStyle(document.getElementById('field')).display, Array.from(document.querySelectorAll('#backdrop .layer')).filter(l => getComputedStyle(l).display !== 'none').length]")
-            check(f"   {lk} + mild blur, colours only: no picture, the colour field is shown", fshow[0] == "block" and fshow[1] == 0 and panel_alpha() < 1, str(fshow))
-            pg.screenshot(path=f"{OUT}/85-blur-colours-{lk}.png")
-        for lk in ["flat", "pastel"]:
-            for blur in ["cover", "colours"]:
-                for colors, covers in (("standard", [("Ember", "red"), ("White Out (96k/24)", "white"), ("Nothing (mono)", "black"), ("Endurance", "gold")]), ("vivid", [("Ember", "red"), ("White Out (96k/24)", "white")])):
-                    for title, label in covers:
-                        appearance(pg, lk, colors, blur, wait=1300); play(pg, title, 0.5); pg.wait_for_timeout(1300)
-                        vv = pg.evaluate("() => Object.fromEntries(['--fg','--dim','--accent'].map(v => [v, getComputedStyle(document.documentElement).getPropertyValue(v).trim()]))")
-                        w = pixels_worst(pg, {"fg": hex2rgb(vv["--fg"]), "dim": hex2rgb(vv["--dim"]), "accent": hex2rgb(vv["--accent"])}, hide_extra=".vz canvas { visibility: hidden !important }")
-                        check(f"   {lk}/{colors}/{blur} '{label}' cover: text {w['fg']:.1f}:1  dim {w['dim']:.1f}:1  accent {w['accent']:.1f}:1 on real pixels", min(w.values()) >= 4.5, str(w))
-        appearance(pg, "frost", "standard", "cover"); play(pg, "Endurance", 0.4)
-        pg.keyboard.press("f"); pg.wait_for_selector("#fs:not([hidden])"); pg.wait_for_timeout(900)
-        check("full-screen lyrics are not touched by the setting (their own blur and dark text shade)", "blur(11px)" in pg.evaluate("getComputedStyle(document.querySelector('#fs .fs-bg')).filter"))
-        pg.keyboard.press("Escape"); pg.wait_for_timeout(300)
-        appearance(pg, "liquid", "standard", "cover"); check("the Liquid look ignores the setting (own moving background)", pg.evaluate("document.documentElement.dataset.blur") == "off")
-        appearance(pg, "flat", "mono", "cover"); check("Black and white ignores it too", pg.evaluate("document.documentElement.dataset.blur") == "off" and panel_alpha() == 1)
-        appearance(pg, "flat", "standard", "off"); check("switching it off brings the solid panels back", panel_alpha() == 1)
-        pg.click("#menubar >> text=File"); pg.click(".menu-item:has-text('Settings')"); pg.wait_for_selector(".tabs-inline"); pg.click(".tabs-inline .tab:has-text('Appearance')"); pg.wait_for_selector("#ap-blurs")
-        check("Settings > Appearance has the three choices", pg.locator("input[name=ap-blur]").count() == 3)
-        pg.locator("label.choice:has(input[value=cover])").click(); pg.wait_for_timeout(1500)
-        check("choosing one applies at once", pg.evaluate("document.documentElement.dataset.blur") == "cover" and pg.locator("input[name=ap-blur][value=cover]").is_checked())
-        pg.screenshot(path=f"{OUT}/86-appearance.png"); pg.keyboard.press("Escape"); pg.wait_for_timeout(300)
-        appearance(pg, "flat", "standard", "off")
 
         # ================================================================== visualisers: count, position, sizes
         print("visualisers")

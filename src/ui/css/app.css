@@ -15,7 +15,7 @@
   --panel-bg: #000000; --menu-bg: #000000; --blur: 0px; --bd-alpha: .34; --bd-bright: .55; --wash: 0;
   --shade1: #9a9a9a; --shade2: #d8d8d8; --shade3: #d8d8d8; --shade4: #d8d8d8;
   --grad: linear-gradient(90deg, #9a9a9a, #d8d8d8); --grad-diag: linear-gradient(135deg, #9a9a9a, #d8d8d8);
-  --cover-lyr-filter: blur(15px) brightness(.5) saturate(1.1); --cover-shade-bg: rgba(12, 12, 12, .58); --fs-filter: blur(11px) brightness(.62) saturate(1.1);
+  --cover-lyr-filter: blur(15px) brightness(.5) saturate(1.1); --cover-shade-bg: rgba(12, 12, 12, .58);
   --fs-scrim: rgba(12, 12, 12, .72); --fs-scrim-end: rgba(12, 12, 12, .1);
   --ly-bg: #0c0c0c; --ly-fg: #ffffff; --ly-dim: #b4b4b4; --ly-accent: #d8d8d8; --ly-on-accent: #0a0a0a; --viz-bg: #000000;
   --viz-h: 150px; --layer-blur: 70px; --fl1: #555; --fl2: #444; --fl3: #333;
@@ -24,7 +24,7 @@
 * { box-sizing: border-box; text-align: left; }
 html, body { height: 100%; margin: 0; }
 body {
-  background: linear-gradient(155deg, var(--bg) 0%, var(--bg2) 100%) fixed;
+  background: linear-gradient(155deg, var(--bg) 0%, var(--bg2) 100%);
   color: var(--fg);
   font: 500 12.5px/1.4 'Montserrat', 'Segoe UI', system-ui, -apple-system, sans-serif;
   overflow: hidden; user-select: none; -webkit-font-smoothing: antialiased;
@@ -35,7 +35,8 @@ button { cursor: pointer; }
 [hidden] { display: none !important; }
 
 #backdrop { position: fixed; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; }
-#backdrop .layer { position: absolute; inset: -60px; background-size: cover; background-position: center; filter: blur(var(--layer-blur, 70px)) saturate(1.5) brightness(var(--bd-bright)); opacity: 0; transition: opacity 1.1s ease; }
+#backdrop .layer { position: absolute; inset: 0; background-size: cover; background-position: center; opacity: 0; transition: opacity 1.1s ease; }
+/* the picture is made blurry, more colourful and darker ONCE in theme.js (a 32 px version stretched over the window). A CSS blur(70px) filter was redone by the GPU for every frame of every animation drawn over it. */
 /* alpha / brightness / wash are set per theme from js/color.js (BACKDROPS): the contrast guarantees are computed from exactly those numbers */
 #backdrop .layer.on { opacity: var(--bd-alpha); }
 #backdrop::after { content: ''; position: absolute; inset: 0; background: var(--bg); opacity: var(--wash); }
@@ -172,10 +173,10 @@ select option { background: var(--panel); color: var(--fg); }
 .pl-row.sel.playing .t, .pl-row.sel.playing .c-num { color: var(--accent-sel); }
 .pl-row.sel .c-num { color: var(--sel-dim); }
 .pl-row .eq { display: inline-flex; gap: 2px; align-items: flex-end; height: 12px; }
-.pl-row .eq i { width: 3px; background: currentColor; border-radius: 1px; animation: eq 0.9s ease-in-out infinite; }
+.pl-row .eq i { width: 3px; height: 12px; background: currentColor; border-radius: 1px; transform-origin: bottom; animation: eq 0.9s ease-in-out infinite; will-change: transform; }
 .pl-row .eq i:nth-child(2) { animation-delay: .2s; } .pl-row .eq i:nth-child(3) { animation-delay: .4s; }
 .paused .eq i { animation-play-state: paused; }
-@keyframes eq { 0%, 100% { height: 3px; } 50% { height: 12px; } }
+@keyframes eq { 0%, 100% { transform: scaleY(.25); } 50% { transform: scaleY(1); } }
 #pl-foot { flex: 0 0 auto; padding: 7px 14px; color: var(--dim); border-top: 1px solid var(--border); font-size: 11.5px; }
 .empty-hint { position: absolute; inset: 0; display: flex; align-items: center; padding: 0 28px; color: var(--dim); line-height: 1.6; pointer-events: none; }
 
@@ -188,8 +189,8 @@ select option { background: var(--panel); color: var(--fg); }
 #cover-ph::after { content: '♪'; font-size: 54px; opacity: .45; color: var(--accent); }
 #cover.on + #cover-ph { display: none; }
 #np-meta { padding: 0 16px 10px; display: flex; flex-direction: column; gap: 2px; }
-#np-title { font-size: 15px; font-weight: 700; line-height: 1.3; overflow-wrap: anywhere; }
-#np-artist { color: var(--accent); font-weight: 600; }
+#np-title { font-size: 22px; font-weight: 800; line-height: 1.2; overflow-wrap: anywhere; }
+#np-artist { color: var(--accent); font-weight: 600; font-size: 13.5px; }
 #np-album { color: var(--dim); }
 #props { padding: 4px 8px 12px; }
 .prop-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
@@ -201,7 +202,7 @@ select option { background: var(--panel); color: var(--fg); }
 /* ------------------------------------------------------------------ visualisers */
 #viz { display: grid; gap: 0; position: relative; min-height: 0; min-width: 0; }          /* columns (panel weights + 8px splitters) are set by js/viz.js */
 /* the visualiser tiles are always dark "screens" (--viz-bg), in every look, so the graphs never invert on a light theme */
-.vz { position: relative; cursor: context-menu; align-self: end; height: calc(var(--vh, 1) * 100%); min-height: 0; min-width: 0; background: var(--viz-bg); -webkit-backdrop-filter: none; backdrop-filter: none; }
+.vz { position: relative; cursor: context-menu; align-self: end; height: calc(var(--vh, 1) * 100%); min-height: 0; min-width: 0; background: var(--viz-bg); }
 .vz:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }
 .vz canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 
@@ -225,7 +226,7 @@ select option { background: var(--panel); color: var(--fg); }
 .menu-item:hover .key, .menu-item.hot .key { color: var(--sel-dim); }
 .menu-sep { height: 1px; background: var(--border); margin: 5px 6px; }
 
-.modal-wrap { position: fixed; inset: 0; background: rgba(0, 0, 0, .55); display: flex; align-items: center; justify-content: center; animation: fade .15s; backdrop-filter: blur(3px); }
+.modal-wrap { position: fixed; inset: 0; background: rgba(0, 0, 0, .62); display: flex; align-items: center; justify-content: center; animation: fade .15s; }
 @keyframes fade { from { opacity: 0; } }
 .modal { width: min(680px, calc(100vw - 48px)); max-height: calc(100vh - 60px); display: flex; flex-direction: column; background: var(--menu-bg); border: 1px solid var(--border); border-radius: 16px; box-shadow: 0 30px 80px rgba(0, 0, 0, .7); overflow: hidden; animation: pop .16s var(--ease); }
 .modal-head { display: flex; align-items: center; gap: 10px; padding: 16px 20px 6px; font-size: 16px; font-weight: 700; }
@@ -308,10 +309,10 @@ input.vslider { writing-mode: vertical-lr; direction: rtl; appearance: slider-ve
 .ly::-webkit-scrollbar { display: none; }
 .ly-in { position: relative; padding: 0 18px; }
 .ly-spacer { height: 40%; }
-.ly-line { font-size: var(--ly-size, 15px); font-weight: 700; line-height: 1.32; padding: 5px 0; color: var(--ly-dim); transition: color .25s ease, transform .25s ease; transform-origin: left center; overflow-wrap: anywhere; }
+.ly-line { font-size: var(--ly-size, 15px); font-weight: 700; line-height: 1.32; padding: 5px 0; color: var(--ly-dim); transition: color .25s ease; overflow-wrap: anywhere; }
 .ly-line.timed { cursor: pointer; }
 .ly-line.timed:hover { color: var(--ly-fg); }
-.ly-line.cur { color: var(--ly-fg); font-weight: 800; transform: scale(1.06); }
+.ly-line.cur { color: var(--ly-fg); font-weight: 800; }
 .ly-line.plain { color: var(--ly-fg); font-weight: 600; }
 .ly-line.gap { height: 0.9em; padding: 0; }
 .ly-msg { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; padding: 30% 22px 0; line-height: 1.5; color: var(--ly-dim); }
@@ -322,7 +323,7 @@ input.vslider { writing-mode: vertical-lr; direction: rtl; appearance: slider-ve
 /* ------------------------------------------------------------------ fullscreen lyrics */
 #fs { position: fixed; inset: 0; z-index: 40; display: flex; flex-direction: column; background: #000; color: var(--ly-fg); animation: fade .2s; }
 #fs[hidden] { display: none; }
-#fs .fs-bg { position: absolute; inset: -40px; background-size: cover; background-position: center; filter: var(--fs-filter); transition: opacity .6s ease; }
+#fs .fs-bg { position: absolute; inset: -40px; background-size: cover; background-position: center; transition: opacity .6s ease; }
 #fs.no-art .fs-bg { background: var(--ly-bg); filter: none; }
 /* Left 70% (all text lives here): dark enough that every theme colour keeps >= 4.5:1 even over a white cover. The right edge lets the art show through. */
 #fs .fs-scrim { position: absolute; inset: 0; background: linear-gradient(90deg, var(--fs-scrim) 0, var(--fs-scrim) 70%, var(--fs-scrim-end) 100%); }
@@ -353,7 +354,7 @@ input.vslider { writing-mode: vertical-lr; direction: rtl; appearance: slider-ve
 .recap-chip.risk { background: transparent; color: var(--accent); box-shadow: inset 0 0 0 1.5px var(--accent); }
 
 /* ------------------------------------------------------------------ recap overlay */
-#recap { position: fixed; inset: 0; z-index: 45; display: flex; align-items: stretch; justify-content: center; background: rgba(0, 0, 0, .5); backdrop-filter: blur(6px); animation: fade .15s; padding: 34px 3vw 18px; }
+#recap { position: fixed; inset: 0; z-index: 45; display: flex; align-items: stretch; justify-content: center; background: rgba(0, 0, 0, .62); animation: fade .15s; padding: 34px 3vw 18px; }
 #recap[hidden] { display: none; }
 .rc-shell { width: min(1240px, 100%); display: flex; flex-direction: column; min-height: 0; background: var(--menu-bg); border: 1px solid var(--border); border-radius: 18px; box-shadow: 0 30px 90px rgba(0, 0, 0, .55); overflow: hidden; animation: pop .18s var(--ease); }
 .rc-head { display: flex; align-items: center; gap: 18px; padding: 16px 22px; flex-wrap: wrap; border-bottom: 1px solid var(--border); background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 14%, transparent), transparent 70%); }
@@ -470,30 +471,13 @@ input.vslider { writing-mode: vertical-lr; direction: rtl; appearance: slider-ve
 .rc-hl dd em { display: block; font-style: normal; color: var(--dim); font-size: 11.5px; font-weight: 600; margin-top: 2px; }
 
 
-/* ------------------------------------------------------------------ looks: pastel, frosted glass, frosted pastel, liquid; vivid colours */
-html[data-look="pastel"], html[data-look="frost"] { color-scheme: light; }
-html[data-look="glass"], html[data-look="liquid"] { color-scheme: dark; }
-/* every translucent look blurs what is behind the panels */
-html[data-look="frost"] .panel, html[data-look="glass"] .panel { -webkit-backdrop-filter: blur(var(--blur)) saturate(1.35); backdrop-filter: blur(var(--blur)) saturate(1.35); }
-/* liquid: the fluid is already smooth and is blurred ONCE (the canvas below), so the panels do not re-blur it every frame */
-html[data-look="liquid"] .panel { -webkit-backdrop-filter: none; backdrop-filter: none; }
-html[data-look="frost"] .panel, html[data-look="pastel"] .panel { border-color: color-mix(in srgb, #fff 60%, var(--border)); box-shadow: 0 8px 28px rgba(40, 40, 80, .10), inset 0 1px 0 rgba(255, 255, 255, .55); }
-html[data-look="glass"] .panel, html[data-look="liquid"] .panel { border-color: color-mix(in srgb, #fff 16%, var(--border)); box-shadow: 0 8px 30px rgba(0, 0, 0, .28), inset 0 1px 0 rgba(255, 255, 255, .10); }
-html[data-look="frost"] .menu, html[data-look="frost"] .modal, html[data-look="frost"] .rc-shell,
-html[data-look="glass"] .menu, html[data-look="glass"] .modal, html[data-look="glass"] .rc-shell,
-html[data-look="liquid"] .menu, html[data-look="liquid"] .modal, html[data-look="liquid"] .rc-shell { -webkit-backdrop-filter: blur(26px) saturate(1.3); backdrop-filter: blur(26px) saturate(1.3); }
-html[data-look="frost"] .menu, html[data-look="frost"] .modal, html[data-look="frost"] .rc-shell, html[data-look="pastel"] .menu, html[data-look="pastel"] .modal { border-color: color-mix(in srgb, #fff 60%, var(--border)); box-shadow: 0 24px 70px rgba(40, 40, 80, .28); }
-html[data-look="glass"] .menu, html[data-look="glass"] .modal, html[data-look="glass"] .rc-shell, html[data-look="liquid"] .menu, html[data-look="liquid"] .modal, html[data-look="liquid"] .rc-shell { border-color: color-mix(in srgb, #fff 16%, var(--border)); box-shadow: 0 24px 70px rgba(0, 0, 0, .5); }
-html[data-look="frost"] .modal-wrap, html[data-look="frost"] #recap, html[data-look="pastel"] .modal-wrap, html[data-look="pastel"] #recap { background: rgba(255, 255, 255, .34); }
-html[data-look="glass"] .modal-wrap, html[data-look="glass"] #recap, html[data-look="liquid"] .modal-wrap, html[data-look="liquid"] #recap { background: rgba(0, 0, 0, .42); }
-html[data-look="frost"] .toast, html[data-look="pastel"] .toast { box-shadow: 0 10px 30px rgba(40, 40, 80, .22); }
-html[data-look="frost"] .rc-cover b, html[data-look="pastel"] .rc-cover b { background: rgba(20, 20, 30, .7); color: #fff; }
-html[data-look="frost"] #app, html[data-look="pastel"] #app, html[data-look="glass"] #app, html[data-look="liquid"] #app { --row-h: 30px; }
-html[data-look="frost"] .panel, html[data-look="frost"] .rc-card, html[data-look="glass"] .panel, html[data-look="liquid"] .panel { transition: background-color .6s ease, border-color .6s ease; }
-/* liquid: the fluid canvas replaces the blurred cover as the layer behind the panels */
-#liquid { position: absolute; inset: -12px; width: calc(100% + 24px); height: calc(100% + 24px); display: none; opacity: var(--bd-alpha); transition: opacity .8s ease; filter: blur(5px); }
-html[data-look="liquid"] #liquid { display: block; }
-html[data-look="liquid"] #backdrop .layer { display: none; }
+/* ------------------------------------------------------------------ looks: flat and pastel (both solid); vivid colours */
+html[data-look="pastel"] { color-scheme: light; }
+html[data-look="pastel"] .panel { border-color: color-mix(in srgb, #fff 60%, var(--border)); box-shadow: 0 8px 28px rgba(40, 40, 80, .10), inset 0 1px 0 rgba(255, 255, 255, .55); }
+html[data-look="pastel"] .menu, html[data-look="pastel"] .modal { border-color: color-mix(in srgb, #fff 60%, var(--border)); box-shadow: 0 24px 70px rgba(40, 40, 80, .28); }
+html[data-look="pastel"] .modal-wrap, html[data-look="pastel"] #recap { background: rgba(255, 255, 255, .34); }
+html[data-look="pastel"] .toast { box-shadow: 0 10px 30px rgba(40, 40, 80, .22); }
+html[data-look="pastel"] .rc-cover b { background: rgba(20, 20, 30, .7); color: #fff; }
 html[data-colors="vivid"][data-look="flat"] .panel { box-shadow: 0 10px 34px rgba(0, 0, 0, .35), 0 0 0 1px color-mix(in srgb, var(--accent) 24%, transparent), 0 0 28px color-mix(in srgb, var(--accent2) 10%, transparent); }
 html[data-colors="vivid"] .icon-btn.primary { box-shadow: 0 0 22px color-mix(in srgb, var(--accent) 60%, transparent); }
 html[data-colors="vivid"] .tab.active { box-shadow: inset 0 -3px 0 var(--shade2); }
@@ -515,7 +499,7 @@ html[data-colors="vivid"] .splitter::after { background: var(--grad); opacity: .
 
 
 /* ------------------------------------------------------------------ drop files from the file manager */
-#dropzone { position: fixed; inset: 10px; z-index: 80; border: 2.5px dashed var(--accent); border-radius: 18px; background: color-mix(in srgb, var(--bg) 78%, transparent); backdrop-filter: blur(6px); display: flex; align-items: center; justify-content: center; pointer-events: none; animation: fade .12s; }
+#dropzone { position: fixed; inset: 10px; z-index: 80; border: 2.5px dashed var(--accent); border-radius: 18px; background: color-mix(in srgb, var(--bg) 86%, transparent); display: flex; align-items: center; justify-content: center; pointer-events: none; animation: fade .12s; }
 #dropzone[hidden] { display: none; }
 #dropzone div { display: flex; flex-direction: column; gap: 6px; padding: 22px 34px; border-radius: 16px; background: var(--menu-bg); border: 1px solid var(--border); }
 #dropzone b { font-size: 19px; font-weight: 800; }
@@ -569,16 +553,6 @@ html[data-square="1"] { --radius: 0px; }
 
 .prop-table th .src { display: block; font-style: normal; font-weight: 600; font-size: 10px; color: var(--dim); letter-spacing: .02em; }
 
-/* ------------------------------------------------------------------ background blur (Settings > Appearance): the flat / pastel looks become see-through glass */
-#field { position: absolute; inset: -8%; display: none; opacity: var(--bd-alpha); filter: blur(28px); transition: opacity .8s ease;
-  background: radial-gradient(58% 55% at 16% 22%, var(--fl1) 0, transparent 72%), radial-gradient(52% 60% at 84% 28%, var(--fl2) 0, transparent 72%), radial-gradient(70% 55% at 48% 96%, var(--fl3) 0, transparent 72%); }
-html[data-blur="colours"]:not([data-look="liquid"]) #field { display: block; }
-html[data-blur="colours"]:not([data-look="liquid"]) #backdrop .layer { display: none; }
-html[data-blur="cover"]:not([data-look="liquid"]) .panel, html[data-blur="colours"]:not([data-look="liquid"]) .panel { -webkit-backdrop-filter: blur(var(--blur)) saturate(1.25); backdrop-filter: blur(var(--blur)) saturate(1.25); }
-html[data-blur="cover"][data-look="flat"] .panel, html[data-blur="colours"][data-look="flat"] .panel { border-color: color-mix(in srgb, #fff 14%, var(--border)); box-shadow: 0 8px 26px rgba(0, 0, 0, .26), inset 0 1px 0 rgba(255, 255, 255, .08); }
-html[data-blur="cover"][data-look="pastel"] .panel, html[data-blur="colours"][data-look="pastel"] .panel { border-color: color-mix(in srgb, #fff 60%, var(--border)); box-shadow: 0 8px 28px rgba(40, 40, 80, .10), inset 0 1px 0 rgba(255, 255, 255, .55); }
-html[data-blur="cover"]:not([data-look="liquid"]) .menu, html[data-blur="colours"]:not([data-look="liquid"]) .menu, html[data-blur="cover"]:not([data-look="liquid"]) .modal, html[data-blur="colours"]:not([data-look="liquid"]) .modal { -webkit-backdrop-filter: blur(22px) saturate(1.25); backdrop-filter: blur(22px) saturate(1.25); }
-html[data-blur="cover"] .vz, html[data-blur="colours"] .vz { -webkit-backdrop-filter: none; backdrop-filter: none; }
 
 /* ------------------------------------------------------------------ visualiser row: splitters between panels, height grips */
 #viz.top .vz { align-self: start; }
@@ -605,7 +579,6 @@ html[data-square="1"] .vz-grip::after { border-radius: 0 !important; }
 @media (prefers-reduced-motion: reduce) { .dj-dot, .dj-btn.dj-live .dj-ic svg { animation: none; } }
 #djpanel { position: fixed; z-index: 55; width: 392px; max-height: calc(100vh - 60px); overflow-y: auto; padding: 14px 16px 16px; background: var(--menu-bg); color: var(--fg); border: 1px solid var(--border); border-radius: 14px; box-shadow: 0 24px 60px rgba(0, 0, 0, .5); scrollbar-width: thin; }
 #djpanel[hidden] { display: none; }
-html:not([data-look="flat"]):not([data-look="pastel"]) #djpanel, html[data-blur="cover"] #djpanel, html[data-blur="colours"] #djpanel { -webkit-backdrop-filter: blur(24px) saturate(1.3); backdrop-filter: blur(24px) saturate(1.3); }
 .dj-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
 .dj-head b { font-size: 15px; font-weight: 800; flex: 1; }
 .dj-state { display: inline-flex; align-items: center; gap: 6px; color: var(--dim); font-size: 11.5px; font-weight: 700; }

@@ -1,1 +1,4 @@
-Prism 2.0.1: installer fix. Copy the contents of this folder over your repo (same paths) and commit. 5 files: a re-made app icon, an icon checker, and an updated build workflow.
+Prism 2.0.2 - Speedpatch (on top of 2.0.x). Copy the CONTENTS of this folder over your repo (same paths) and commit. 40 files.
+Includes the new icon files (build/icon.png, build/icon.ico, build/installer.nsh).
+Optional clean-up: src/ui/js/liquid.js is no longer used and can be deleted (nothing loads it).
+Read SPEEDPATCH.md for the diagnosis.

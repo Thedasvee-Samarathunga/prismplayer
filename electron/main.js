@@ -103,7 +103,9 @@ async function createWindow() {
   win = new BrowserWindow({
     width: b.width || 1480, height: b.height || 900, x: b.x, y: b.y, minWidth: 900, minHeight: 600,
     backgroundColor: '#000000', show: false, title: 'Prism',
-    icon: ['icon.ico', 'icon.png'].map((n) => path.join(__dirname, '..', 'build', n)).find((f) => fs.existsSync(f)),       // (a packaged app takes the icon from the .exe itself)
+    // the window / taskbar icon: the packaged app carries it next to the program (resources/icon/icon.png, see extraResources in package.json: the build folder is not
+    // inside the app), a development run reads it from build/. Without this the window depended on the icon stored in Prism.exe alone.
+    icon: [process.resourcesPath && path.join(process.resourcesPath, 'icon', 'icon.png'), path.join(__dirname, '..', 'build', 'icon.png'), path.join(__dirname, '..', 'build', 'icon.ico')].filter(Boolean).find((f) => fs.existsSync(f)),
     // No native title bar and no native window buttons: the app draws its own minimise / maximise / close buttons in the theme's colours
     // (the native overlay can only show one flat colour, which never matched the album colours). The title bar is a drag region.
     titleBarStyle: 'hidden',
@@ -122,6 +124,10 @@ async function createWindow() {
   const tell = (ch, v) => { if (win && !win.isDestroyed()) win.webContents.send(ch, v); };
   win.on('enter-full-screen', () => tell('fullscreen', true));
   win.on('leave-full-screen', () => tell('fullscreen', false));
+  win.on('minimize', () => tell('win-visible', false));
+  win.on('hide', () => tell('win-visible', false));
+  win.on('restore', () => tell('win-visible', true));
+  win.on('show', () => tell('win-visible', true));
   win.on('maximize', () => tell('win-state', { maximized: true }));
   win.on('unmaximize', () => tell('win-state', { maximized: false }));
 

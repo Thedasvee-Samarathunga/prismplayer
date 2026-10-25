@@ -49,11 +49,21 @@ function trackId(file) {
   return crypto.createHash('sha1').update(path.resolve(file)).digest('hex').slice(0, 12);
 }
 
+// Background work (reading tags while scanning, cover pictures, loudness scans, pre-decoding the next tracks) runs at a LOWER priority, so on a busy PC it
+// can never slow down the decoder of the track that is playing or starting.
+const os = require('os');
+function lowPriority(child) {
+  try { if (child && child.pid) os.setPriority(child.pid, os.constants.priority.PRIORITY_BELOW_NORMAL); } catch (_) { /* not allowed / already gone */ }
+  return child;
+}
 function execFileP(bin, args, opts) {
   return new Promise((resolve, reject) => {
-    execFile(bin, args, Object.assign({ maxBuffer: 32 * 1024 * 1024, windowsHide: true, encoding: 'utf8' }, opts), (err, stdout, stderr) => {
+    const o = Object.assign({ maxBuffer: 32 * 1024 * 1024, windowsHide: true, encoding: 'utf8' }, opts);
+    const low = o.low; delete o.low;
+    const cp = execFile(bin, args, o, (err, stdout, stderr) => {
       if (err) { err.stderr = stderr; reject(err); } else resolve({ stdout, stderr });
     });
+    if (low) lowPriority(cp);
   });
 }
 
@@ -63,7 +73,7 @@ function execFileP(bin, args, opts) {
 async function probeRaw(file) {
   const { stdout } = await execFileP(FFPROBE, [
     '-v', 'error', '-print_format', 'json', '-show_format', '-show_streams', file,
-  ], { timeout: 30000 });
+  ], { timeout: 30000, low: true });
   return JSON.parse(stdout);
 }
 
@@ -223,7 +233,7 @@ function extractEmbeddedCoverNow(file, size) {
     if (size) args.push('-vf', `scale=${size}:-2`, '-frames:v', '1', '-q:v', '3', '-f', 'mjpeg');
     else args.push('-frames:v', '1', '-c', 'copy', '-f', 'image2pipe');
     args.push('pipe:1');
-    const p = spawn(FFMPEG, args, { windowsHide: true });
+    const p = lowPriority(spawn(FFMPEG, args, { windowsHide: true }));
     const chunks = [];
     p.stdout.on('data', (d) => chunks.push(d));
     p.on('error', () => resolve(null));
@@ -237,7 +247,7 @@ function extractEmbeddedCoverNow(file, size) {
 
 function scaleImageFileNow(file, size) {
   return new Promise((resolve) => {
-    const p = spawn(FFMPEG, ['-v', 'error', '-nostdin', '-i', file, '-vf', `scale=${size}:-2`, '-frames:v', '1', '-q:v', '3', '-f', 'mjpeg', 'pipe:1'], { windowsHide: true });
+    const p = lowPriority(spawn(FFMPEG, ['-v', 'error', '-nostdin', '-i', file, '-vf', `scale=${size}:-2`, '-frames:v', '1', '-q:v', '3', '-f', 'mjpeg', 'pipe:1'], { windowsHide: true }));
     const chunks = [];
     p.stdout.on('data', (d) => chunks.push(d));
     p.on('error', () => resolve(null));
@@ -304,7 +314,7 @@ function spawnPcm(file, plan, startSec, cue) {
 // Measures ReplayGain (track gain + peak) with ffmpeg's replaygain filter. Returns {gain, peak} or null.
 async function scanReplayGain(track) {
   const run = async (pre) => {
-    const { stderr } = await execFileP(FFMPEG, ['-hide_banner', '-nostats', '-v', 'info', '-i', track.path, '-vn', '-af', pre + 'replaygain', '-f', 'null', '-'], { timeout: 600000 }).catch((e) => ({ stderr: e.stderr || '' }));
+    const { stderr } = await execFileP(FFMPEG, ['-hide_banner', '-nostats', '-v', 'info', '-i', track.path, '-vn', '-af', pre + 'replaygain', '-f', 'null', '-'], { timeout: 600000, low: true }).catch((e) => ({ stderr: e.stderr || '' }));
     const g = /track_gain = ([+-]?\d+(?:\.\d+)?) dB/.exec(stderr), p = /track_peak = (\d+(?:\.\d+)?)/.exec(stderr);
     return g && p ? { gain: parseFloat(g[1]), peak: parseFloat(p[1]) } : null;
   };
@@ -321,7 +331,7 @@ async function binariesOk() {
 }
 
 module.exports = {
-  FFMPEG, FFPROBE, AUDIO_EXT, MIME, isAudioFile, isCueFile, isImageFile, trackId,
+  lowPriority, FFMPEG, FFPROBE, AUDIO_EXT, MIME, isAudioFile, isCueFile, isImageFile, trackId,
   probeRaw, normalizeProbe, probeTrack, scanReplayGain, extractEmbeddedCover, scaleImageFile, findFolderCover,
   transcodePlan, wavHeader, spawnPcm, binariesOk,
 };

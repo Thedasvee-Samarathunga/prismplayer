@@ -9,14 +9,36 @@ import { openMenu } from './menus.js';
 import { VIZ, vizById, bandLevels, sanitizeViz } from './vizlib.js';
 import { MAX_VIZ, MIN_VIZ, normalizeLayout, gridColumns, panelColumn, splitColumn, resizePair, resizeHeight, resizeRow, addPanel, removePanel, setCount, resetSizes, nextUnused } from './vizlayout.js';
 
-function fit(canvas) {
-  const dpr = Math.min(2, window.devicePixelRatio || 1);
-  const w = Math.max(1, Math.round(canvas.clientWidth * dpr)), h = Math.max(1, Math.round(canvas.clientHeight * dpr));
+// Quality levels (Settings > Appearance > Visualiser quality). The glow behind bars and lines is a Gaussian blur drawn for EVERY bar, every frame: it is by
+// far the most expensive thing the visualisers do, so only 'smooth' has it.
+//   smooth   60 fps, glow, full resolution         balanced (default)  30 fps, no glow, up to 1.25x resolution       light  20 fps, no glow, 1x resolution
+export const PERF = {
+  smooth: { gap: 15, dprMax: 2, glow: true },
+  balanced: { gap: 32, dprMax: 1.25, glow: false },
+  light: { gap: 48, dprMax: 1, glow: false },
+};
+export const perfOf = (settings) => { const a = (settings && settings.appearance) || {}; return PERF[a.perf] ? a.perf : 'balanced'; };
+
+// The size of a canvas is measured by a ResizeObserver, never by reading clientWidth / clientHeight inside the drawing loop (reading them forces the
+// browser to redo the page layout, once per canvas per frame).
+const sizes = new WeakMap();
+let ro = null;
+function watchSize(canvas, onChange) {
+  if (!ro && typeof ResizeObserver !== 'undefined') {
+    ro = new ResizeObserver((entries) => { for (const e of entries) { const cb = sizes.get(e.target); if (cb) { cb.w = e.contentRect.width; cb.h = e.contentRect.height; cb.on(); } } });
+  }
+  const rec = { w: canvas.clientWidth, h: canvas.clientHeight, on: onChange };
+  sizes.set(canvas, rec);
+  if (ro) ro.observe(canvas);
+}
+function fit(canvas, dprMax) {
+  const rec = sizes.get(canvas) || { w: canvas.clientWidth, h: canvas.clientHeight };
+  const dpr = Math.min(dprMax, window.devicePixelRatio || 1);
+  const w = Math.max(1, Math.round(rec.w * dpr)), h = Math.max(1, Math.round(rec.h * dpr));
   let resized = false;
   if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; resized = true; }
   return { w, h, dpr, resized };
 }
-
 export { sanitizeViz };
 
 // The visualiser tiles are always dark screens: use the theme's visualiser palette (light looks get a dark one) on top of the theme.
@@ -102,6 +124,7 @@ export function initViz() {
       }
       const canvas = el.querySelector('canvas');
       const p = { el, canvas, c: canvas.getContext('2d'), id, inst: null, fresh: true };
+      watchSize(canvas, () => wake(5));
       el.addEventListener('contextmenu', (e) => { e.preventDefault(); contextMenu(e, panels.indexOf(p)); });
       return p;
     });
@@ -169,9 +192,11 @@ export function initViz() {
   // ------------------------------------------------------------------ drawing
   function frame(now) {
     requestAnimationFrame(frame);
-    if (document.hidden || S.layout.hideViz) return;
+    if (document.hidden || S.layout.hideViz || S.windowHidden) return;           // minimised: nothing is drawn at all
+    const q = PERF[perfOf(S.settings)];
+    const gap = document.hasFocus() || perfOf(S.settings) === 'smooth' ? q.gap : Math.max(q.gap, 66);        // Prism behind another window: at most 15 fps (not for 'smooth': that is what it was chosen for)
     const dt = Math.min(60, now - lastDraw || 16.7);
-    if (now - lastDraw < 14) return;                    // ~60 fps cap
+    if (now - lastDraw < gap - 2) return;
     lastDraw = now;
     const live = engine.playing;
     if (live) activeFrames = 90; else if (activeFrames > 0) activeFrames--; else if (!needsClear) return;   // idle: stop painting
@@ -181,9 +206,9 @@ export function initViz() {
     const bands = (n, lo, hi) => { const k = n + ':' + (lo || 40) + ':' + (hi || 16000); let v = cache.get(k); if (!v) { v = bandLevels(freq, sr, n, lo || 40, hi || 16000); cache.set(k, v); } return v; };
     const t = vizTheme(S.theme), square = document.documentElement.dataset.square === '1';
     for (const p of panels) {
-      const { w, h, dpr, resized } = fit(p.canvas);
+      const { w, h, dpr, resized } = fit(p.canvas, q.dprMax);
       if (!p.inst.persist) p.c.clearRect(0, 0, w, h);
-      p.inst.draw(p.c, { w, h, dpr, t, live, dt, sr, freq, time: an ? an.time : null, L: an ? an.L : null, R: an ? an.R : null, resized, fresh: p.fresh, lut: buildLut(t), bands, square });
+      p.inst.draw(p.c, { w, h, dpr, t, live, dt, sr, freq, time: an ? an.time : null, L: an ? an.L : null, R: an ? an.R : null, resized, fresh: p.fresh, lut: buildLut(t), bands, square, glow: q.glow });
       p.fresh = false;
     }
     needsClear = false;
@@ -192,6 +217,8 @@ export function initViz() {
   on('layout', () => { layoutGeometry(); });
   window.addEventListener('resize', () => wake(5));
   on('playstate', () => wake(90));
+  on('settings', () => wake(5));
+  window.addEventListener('focus', () => wake(5));
 
   api = { add, remove, setCount: setN, setTop, resetSizes: reset, setPanel };
   build();

@@ -30,8 +30,8 @@ A foobar2000-style music player whose whole interface takes its colours from the
   before, top artist / album / song, busiest day, favourite weekday, longest run, new artists and genres.
 * **Music DJ** (top ribbon, after Recap): an endless auto-mix from the whole library or from the genres you pick. Styles: balanced, favourites, discover (uses your play counts). It avoids repeating songs and artists,
   stays in a genre for a few songs, keeps neighbours similar in era and loudness, and can **crossfade** songs (0-12 s, equal-power) while the DJ is on. It keeps ten songs queued in a playlist called "DJ Mix".
-* **Background blur** (Settings > Appearance > Background blur): *Mild blur with album cover* or *colours only* turns the flat and pastel looks into see-through glass over a lightly blurred cover (or a soft
-  field of the album's colours). Contrast is checked on the real pixels for every combination.
+* **Speed (2.0.2):** a lot of work was taken off the processor and the graphics card. The visualisers have quality levels (Settings > Appearance, or View > Visualiser quality): *Smooth*, *Balanced* (the default, 30 frames a second, no glow) and *Light*.
+  Nothing is drawn while the window is minimised, and at most 15 frames a second while it is behind another window (except at *Smooth*). The blurred album picture behind the window is made once per cover instead of being blurred by the graphics card on every frame.
 * **1 to 6 visualisers**, at the top or the bottom of the window (right-click a visualiser, View menu or Settings > Appearance). Drag the line between two visualisers for their widths, the small bar on a
   visualiser for its height, the edge of the row for all heights; double-click to reset. Everything is remembered.
 * **New app icon:** one bold gradient prism on a dark tile; readable at 16 px in the taskbar. The window buttons, taskbar grouping and installer use it (`build/icon.ico`, `build/icon.png`).
@@ -41,10 +41,9 @@ A foobar2000-style music player whose whole interface takes its colours from the
   It only *reads* Last.fm (the API key from the scrobbling settings + a user name). Your history is downloaded once, then updated incrementally, and the streak and
   trends are worked out from a small local copy, so they open instantly and work offline. Days are counted in your local time zone.
 * **Colours and looks** (Settings › Appearance, or View › Colours / Look): *Album colours* (calm), *Album colours: vivid* (more shades from the cover, brighter and stronger) or *Black and white* (flat),
-  combined with one of five looks: **Flat** (solid dark panels), **Pastel** (soft, light, solid panels), **Frosted glass** (dark glass over the blurred cover), **Frosted pastel** (light glass) and **Liquid**
-  (dark glass over a fluid in the album's colours; it ripples to the bass, and you can shake it: move the window, shake the mouse, click the background, or View › Shake the liquid; it is not drawn at all
-  in the other looks). Colours always come from the album; there is no colour picker. Every combination keeps text at 4.5:1 or better, checked on the real pixels behind the text (the fluid's exact colours are part of the check).
-  Lyrics and the visualiser tiles always use light-on-dark colours of their own, so they never go black or inverted on a light look.
+  combined with one of two looks: **Flat** (solid dark panels) or **Pastel** (soft, light, solid panels). Colours always come from the album; there is no colour picker. Every combination keeps text at 4.5:1 or better,
+  checked on the real pixels behind the text. Lyrics and the visualiser tiles always use light-on-dark colours of their own, so they never go black or inverted on a light look.
+  (The see-through looks, *Frosted glass*, *Frosted pastel* and *Liquid*, and the *background blur* were removed in 2.0.2: they made text soft on screens with display scaling and kept the graphics card busy. A saved choice of one of them becomes its solid sibling.)
 * **Shape and layout:** *Square corners* removes the rounding from every element (and from the visualisers). Switch off *Show a visualiser under the Now playing panel* and that panel runs the full height of the window.
 * **Window buttons:** the desktop app draws its own minimise / maximise / close buttons in the theme's colours (the system ones can only be one flat colour). Close hovers in the album accent.
 * **Visualisers:** 12, swap any panel with a right-click. The VU meter is a pair of backlit analogue dials: a real scale (-20 to +3 VU), a hatched hot zone, a tapered needle with shadow and counterweight, spring ballistics, a peak lamp and a glass glare.
@@ -93,8 +92,9 @@ opens the player in your browser (Edge opens it as an app window). Data is kept 
     npm test                              # server, gapless (bit-exact), native helper, EQ, ReplayGain, folders, colour engine, queue/tree logic
     python test/e2e.py                    # the real UI in headless Chromium: plays every fixture format, gapless hand-over, EQ, ReplayGain, settings
     python test/e2e_native.py             # the WASAPI path end to end (the helper is built with a test sink on Linux)
-    python test/e2e_v20.py                # cue sheets, Last.fm play counts, recap summary, background blur, 1-6 visualisers, the DJ, the icon
-    python test/e2e_v14.py                # looks on real pixels, liquid shaking, window buttons, square corners, VU, full-height Now playing
+    python test/e2e_v20.py                # cue sheets, Last.fm play counts, recap summary, 1-6 visualisers, the DJ, the icon
+    python test/e2e_speed.py              # the 2.0.2 speed patch: one seek-bar loop, no filters, visualiser quality, deferred pre-decoding, contrast on the pre-blurred backdrop
+    python test/e2e_v14.py                # looks on real pixels, window buttons, square corners, VU, full-height Now playing
     python test/e2e_features.py           # lyrics, fullscreen, open folder, drag-highlight, swappable visualisers (LRCLIB is mocked)
     python test/e2e_v13.py                # seek bar alignment, Last.fm recap (mock), colour modes x looks on real pixels, file drops, hotkeys, cache
 

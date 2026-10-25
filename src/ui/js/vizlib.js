@@ -59,7 +59,7 @@ function spectrum() {
       const x0 = pad + (w - pad * 2 - (n * bw + (n - 1) * gap)) / 2, H = h - pad * 2, base = h - pad;
       const g = c.createLinearGradient(0, base, 0, pad);
       stops(g, t);
-      c.fillStyle = g; c.shadowColor = rgba(t.accent, 0.55); c.shadowBlur = 10 * dpr;
+      c.fillStyle = g; c.shadowColor = rgba(t.accent, 0.55); c.shadowBlur = f.glow ? 10 * dpr : 0;
       for (let i = 0; i < n; i++) {
         if (bars[i] < 0.012) continue;
         const bh = Math.max(2 * dpr, bars[i] * H), x = x0 + i * (bw + gap);
@@ -110,7 +110,7 @@ function mirror() {
       follow(bars, f.bands(n), 0.88);
       const x0 = pad + (w - pad * 2 - (n * bw + (n - 1) * gap)) / 2;
       const up = c.createLinearGradient(0, mid, 0, pad); stops(up, t);
-      c.shadowColor = rgba(t.accent, 0.5); c.shadowBlur = 8 * dpr;
+      c.shadowColor = rgba(t.accent, 0.5); c.shadowBlur = f.glow ? 8 * dpr : 0;
       for (let i = 0; i < n; i++) {
         const bh = Math.max(1.5 * dpr, bars[i] * half), x = x0 + i * (bw + gap);
         c.fillStyle = multi(t) ? hex(shadeAt(t, i / (n - 1))) : up; c.beginPath(); c.roundRect(x, mid - bh, bw, bh, rad(f, Math.min(3 * dpr, bw / 2))); c.fill();
@@ -141,7 +141,7 @@ function area() {
       fill.addColorStop(0, rgba(t.accent, 0.55)); fill.addColorStop(1, rgba(t.accent2, 0.05));
       path(); c.lineTo(pts[n - 1][0], base); c.lineTo(pts[0][0], base); c.closePath(); c.fillStyle = fill; c.fill();
       const line = c.createLinearGradient(pad, 0, w - pad, 0); stops(line, t);
-      path(); c.strokeStyle = line; c.lineWidth = 2.2 * dpr; c.lineJoin = 'round'; c.shadowColor = rgba(t.accent, 0.6); c.shadowBlur = 9 * dpr; c.stroke(); c.shadowBlur = 0;
+      path(); c.strokeStyle = line; c.lineWidth = 2.2 * dpr; c.lineJoin = 'round'; c.shadowColor = rgba(t.accent, 0.6); c.shadowBlur = f.glow ? 9 * dpr : 0; c.stroke(); c.shadowBlur = 0;
     },
   };
 }
@@ -163,7 +163,7 @@ function radial() {
       if (f.live) spin += f.dt * 0.00006;
       const cx = w / 2, cy = h / 2, R = Math.min(w, h) / 2 - 10 * dpr, r0 = R * (0.38 + bass * 0.06), len = R - r0;
       c.lineCap = f.square ? 'butt' : 'round'; c.lineWidth = Math.max(2 * dpr, (Math.PI * 2 * r0) / n * 0.55);
-      c.shadowColor = rgba(t.accent, 0.5); c.shadowBlur = 8 * dpr;
+      c.shadowColor = rgba(t.accent, 0.5); c.shadowBlur = f.glow ? 8 * dpr : 0;
       for (let i = 0; i < n; i++) {
         const a = spin * Math.PI * 2 + (i / n) * Math.PI * 2 - Math.PI / 2, l = Math.max(2 * dpr, bars[i] * len);
         c.strokeStyle = hex(multi(t) ? shadeAt(t, i / n) : mix(t.accent2, t.accent, Math.abs(i / n - 0.5) * 2));
@@ -181,7 +181,7 @@ function scope() {
       const { w, h, dpr, t, time } = f;
       c.strokeStyle = rgba(t.fg, 0.1); c.lineWidth = dpr; c.beginPath(); c.moveTo(0, h / 2); c.lineTo(w, h / 2); c.stroke();
       const g = c.createLinearGradient(0, 0, w, 0); stops(g, t);
-      c.strokeStyle = g; c.lineWidth = 2 * dpr; c.lineJoin = 'round'; c.shadowColor = rgba(t.accent, 0.6); c.shadowBlur = 9 * dpr;
+      c.strokeStyle = g; c.lineWidth = 2 * dpr; c.lineJoin = 'round'; c.shadowColor = rgba(t.accent, 0.6); c.shadowBlur = f.glow ? 9 * dpr : 0;
       c.beginPath();
       if (f.live && time && time.length) {
         let s = 0;
@@ -210,7 +210,7 @@ function xy() {
       c.beginPath(); c.moveTo(cx - s * 0.7, cy + s * 0.7); c.lineTo(cx + s * 0.7, cy - s * 0.7); c.moveTo(cx - s * 0.7, cy - s * 0.7); c.lineTo(cx + s * 0.7, cy + s * 0.7); c.stroke();
       if (!f.live || !L || !R) return;
       const n = Math.min(L.length, R.length, 1024), sc = s * 1.15;
-      c.fillStyle = rgba(t.accent, 0.8); c.shadowColor = rgba(t.accent, 0.7); c.shadowBlur = 6 * dpr;
+      c.fillStyle = rgba(t.accent, 0.8); c.shadowColor = rgba(t.accent, 0.7); c.shadowBlur = f.glow ? 6 * dpr : 0;
       for (let i = 0; i < n; i += 2) {
         const m = (L[i] + R[i]) * 0.7071, d = (R[i] - L[i]) * 0.7071;            // mid / side: mono shows as a vertical line
         c.fillRect(cx + Math.max(-1, Math.min(1, d)) * sc - dpr, cy - Math.max(-1, Math.min(1, m)) * sc - dpr, 2 * dpr, 2 * dpr);
@@ -354,7 +354,7 @@ function vu() {
     // ---- needle: shadow, tapered body in the album's colours, counterweight, hub
     const a = ang(n.x), s1 = Math.sin(a), c1 = Math.cos(a), len = R * 1.06, bw = Math.max(1.6 * dpr, R * 0.035);
     const tri = (ox, oy) => { c.beginPath(); c.moveTo(cx + ox - c1 * bw, py + oy - s1 * bw); c.lineTo(cx + ox + s1 * len, py + oy - c1 * len); c.lineTo(cx + ox + c1 * bw, py + oy + s1 * bw); c.lineTo(cx + ox - s1 * R * 0.2, py + oy + c1 * R * 0.2); c.closePath(); };
-    c.fillStyle = 'rgba(0,0,0,0.38)'; c.shadowColor = 'rgba(0,0,0,0.5)'; c.shadowBlur = 4 * dpr; tri(2.4 * dpr, 3 * dpr); c.fill(); c.shadowBlur = 0;
+    c.fillStyle = 'rgba(0,0,0,0.38)'; c.shadowColor = 'rgba(0,0,0,0.5)'; c.shadowBlur = f.glow ? 4 * dpr : 0; tri(2.4 * dpr, 3 * dpr); c.fill(); c.shadowBlur = 0;
     const ng = c.createLinearGradient(cx, py, cx + s1 * len, py - c1 * len); ng.addColorStop(0, hex(mix(t.fg, t.accent2, 0.5))); ng.addColorStop(0.55, hex(t.fg)); ng.addColorStop(1, hex(mix(t.fg, t.accent, 0.55)));
     c.fillStyle = ng; tri(0, 0); c.fill();
     const hr = Math.max(4 * dpr, R * 0.075), hg = c.createRadialGradient(cx - hr * 0.3, py - hr * 0.35, 0, cx, py, hr);
@@ -365,7 +365,7 @@ function vu() {
     // ---- peak lamp (lights when the signal gets within 1 dB of full scale)
     const lr = Math.max(3 * dpr, R * 0.045), lx = x + mw - 12 * dpr - lr, ly = y + 12 * dpr + lr;
     c.fillStyle = rgba(t.dim, 0.25); c.beginPath(); c.arc(lx, ly, lr, 0, Math.PI * 2); c.fill();
-    if (n.lamp > 0.02) { c.shadowColor = hex(t.accent); c.shadowBlur = 10 * dpr * n.lamp; c.fillStyle = rgba(t.accent, 0.35 + 0.65 * n.lamp); c.beginPath(); c.arc(lx, ly, lr, 0, Math.PI * 2); c.fill(); c.shadowBlur = 0; }
+    if (n.lamp > 0.02) { c.shadowColor = hex(t.accent); c.shadowBlur = f.glow ? 10 * dpr * n.lamp : 0; c.fillStyle = rgba(t.accent, 0.35 + 0.65 * n.lamp); c.beginPath(); c.arc(lx, ly, lr, 0, Math.PI * 2); c.fill(); c.shadowBlur = 0; }
 
     // ---- glass glare
     const gl = c.createLinearGradient(x, y, x + mw * 0.6, y + mh * 0.6); gl.addColorStop(0, 'rgba(255,255,255,0.13)'); gl.addColorStop(1, 'rgba(255,255,255,0)');
@@ -418,7 +418,7 @@ function ripple() {
         c.strokeStyle = rgba(multi(t) ? shadeAt(t, q.r / maxR) : mix(t.accent2, t.accent, q.r / maxR), q.a); c.lineWidth = (2 + 5 * q.a) * dpr;
         c.beginPath(); c.arc(cx, cy, q.r, 0, Math.PI * 2); c.stroke();
       }
-      c.fillStyle = rgba(t.accent, 0.25 + energy * 0.6); c.shadowColor = rgba(t.accent, 0.7); c.shadowBlur = 14 * dpr;
+      c.fillStyle = rgba(t.accent, 0.25 + energy * 0.6); c.shadowColor = rgba(t.accent, 0.7); c.shadowBlur = f.glow ? 14 * dpr : 0;
       c.beginPath(); c.arc(cx, cy, (5 + energy * 16) * dpr, 0, Math.PI * 2); c.fill(); c.shadowBlur = 0;
     },
   };

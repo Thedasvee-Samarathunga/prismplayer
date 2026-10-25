@@ -31,8 +31,11 @@ export function slider(el, { onMove, onEnd, onKey }) {
 }
 
 function setFill(el, f) {
-  el.querySelector('.seek-fill').style.width = f * 100 + '%';
-  el.querySelector('.seek-thumb').style.left = f * 100 + '%';
+  const w = Math.round(f * 2000) / 20 + '%';           // 0.05 % steps; nothing is written when the value did not change
+  if (el._fillW === w) return;
+  el._fillW = w;
+  (el._fill || (el._fill = el.querySelector('.seek-fill'))).style.width = w;
+  (el._thumb || (el._thumb = el.querySelector('.seek-thumb'))).style.left = w;
 }
 
 export function initTransport() {
@@ -47,8 +50,12 @@ export function initTransport() {
   const seek = $('seek'), time = $('time');
   let dragging = false, dragFrac = 0;
   const dur = () => (P.cur ? (engine.duration || P.cur.track.duration || 0) : 0);
+  let lastText = '';
   function paintTime(pos, d) {
-    time.textContent = `${fmtTime(pos)} / ${fmtTime(d)}`;
+    const text = `${fmtTime(pos)} / ${fmtTime(d)}`;
+    if (text === lastText) return;                     // the text only changes once a second: do not touch the DOM in between
+    lastText = text;
+    time.textContent = text;
     seek.setAttribute('aria-valuemax', Math.round(d)); seek.setAttribute('aria-valuenow', Math.round(pos));
     seek.setAttribute('aria-valuetext', `${fmtTime(pos)} of ${fmtTime(d)}`);
   }
@@ -57,18 +64,24 @@ export function initTransport() {
     onEnd: (f) => { dragging = false; if (P.cur) seekTo(f * dur()); },
     onKey: (e) => { if (e.key === 'ArrowRight') { seekTo(engine.position + 5); return true; } if (e.key === 'ArrowLeft') { seekTo(engine.position - 5); return true; } return false; },
   });
+  // ONE loop only. (Before 2.0.2 every play-state change and every new track started another loop that never ended while playing, so after a few tracks
+  // dozens of loops rewrote the seek bar 60 times a second each: the longer you listened, the slower the app got.)
+  // The bar and the time are redrawn about 15 times a second (a timer, not a frame callback): smooth for a 5 px bar, and the page is not woken 60 times a second.
+  let timer = 0;
   function tick() {
+    timer = 0;
     if (!dragging) {
       const d = dur(), pos = P.cur ? engine.position : 0;
       setFill(seek, d ? Math.min(1, pos / d) : 0);
       paintTime(pos, d);
     }
-    if (P.state === 'playing') requestAnimationFrame(tick);
+    if (P.state === 'playing') kick();
   }
-  on('playstate', () => requestAnimationFrame(tick));
-  on('engine:time', () => { if (P.state !== 'playing') requestAnimationFrame(tick); });
-  on('nowplaying', () => requestAnimationFrame(tick));
-
+  function kick() { if (!timer) timer = setTimeout(tick, 66); }
+  function paintNow() { clearTimeout(timer); timer = 0; tick(); }
+  on('playstate', paintNow);
+  on('engine:time', () => { if (P.state !== 'playing') paintNow(); });
+  on('nowplaying', paintNow);
   // ---- volume
   const vol = $('vol-slider');
   function paintVol() {

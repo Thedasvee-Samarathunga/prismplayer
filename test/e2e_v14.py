@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """End-to-end tests (real UI in headless Chromium + real server + real audio) for 1.4:
- * the five looks (pastel, frosted glass, frosted pastel, liquid): text contrast measured on REAL screen pixels, visualisers never inverted,
+ * the solid looks (flat, pastel; the glass / frosted / liquid looks were removed in 2.0.2): text contrast measured on REAL screen pixels, visualisers never inverted,
    lyrics light-on-dark with a clearly different current line (cover overlay + fullscreen)
  * the app's own window buttons (blend into the theme, act on the window, restore icon)
- * the liquid: it is drawn in the album's colours, reacts to mouse shaking / window shaking / the menu item / a click, calms down again, stops when off
+ *
  * 'Now playing' running the full height (no visualiser under it), square corners, the new VU meter, no button under the cover
 Usage: python test/e2e_v14.py"""
 import colorsys, glob, io, json, os, shutil, signal, subprocess, sys, tempfile, time
@@ -141,13 +141,13 @@ def run():
         d = ctx.new_page(); d.goto(BASE + "/?desktop"); d.wait_for_function("() => window.__prism && window.__prism.S.list.length === 16", timeout=15000)
         play(d, "Ember", 0.6)
         worst_wc = {}
-        for lk in ["flat", "pastel", "glass", "frost", "liquid"]:
+        for lk in ["flat", "pastel"]:
             look(d, lk)
             st = d.evaluate("""() => { const b = document.getElementById('wc-min'), cs = getComputedStyle(b); return { bg: cs.backgroundColor, color: cs.color, fg: getComputedStyle(document.documentElement).getPropertyValue('--fg').trim() }; }""")
             transparent = st["bg"] in ("rgba(0, 0, 0, 0)", "transparent")
             rgb = tuple(int(x) for x in st["color"].replace("rgb(", "").replace(")", "").split(",")[:3])
             fgc = hex2rgb(st["fg"])
-            r = pixels_worst(d, {"icon": fgc}, hide_extra="#liquid { visibility: visible !important } #wincontrols svg { visibility: hidden !important }", clip=d.locator("#wincontrols").bounding_box(), text_boxes=False)
+            r = pixels_worst(d, {"icon": fgc}, hide_extra="#wincontrols svg { visibility: hidden !important }", clip=d.locator("#wincontrols").bounding_box(), text_boxes=False)
             worst_wc[lk] = r["icon"]
             check(f"   {lk}: buttons are transparent, icons use the theme text colour, {r['icon']:.1f}:1 against what is behind them", transparent and rgb == fgc and r["icon"] >= 4.5, f"{st} {r}")
         d.mouse.move(800, 500); d.wait_for_timeout(200); d.hover("#wc-close")
@@ -160,18 +160,17 @@ def run():
         # ================================================================== the looks: contrast on real pixels, visualisers, lyrics
         print("looks")
         covers = [("Ember", "red"), ("White Out (96k/24)", "white"), ("Nothing (mono)", "black"), ("Endurance", "gold")]
-        for lk in ["pastel", "glass", "frost", "liquid"]:
+        for lk in ["pastel"]:
             for colors in ["standard", "vivid"]:
                 for title, label in (covers[:2] if colors == "vivid" else covers):
                     look(pg, lk, colors, wait=1300); play(pg, title, 0.6); pg.wait_for_timeout(1500)
-                    if lk == "liquid": pg.evaluate("window.__prismLiquid.shake()"); pg.wait_for_timeout(500)
                     v = css_vars(pg, ["--fg", "--dim", "--accent", "--viz-bg"])
-                    r = pixels_worst(pg, {"fg": hex2rgb(v["--fg"]), "dim": hex2rgb(v["--dim"]), "accent": hex2rgb(v["--accent"])}, hide_extra="#liquid { visibility: visible !important } .vz canvas { visibility: hidden !important }")
+                    r = pixels_worst(pg, {"fg": hex2rgb(v["--fg"]), "dim": hex2rgb(v["--dim"]), "accent": hex2rgb(v["--accent"])}, hide_extra=".vz canvas { visibility: hidden !important }")
                     check(f"   {lk}/{colors} '{label}' cover: text {r['fg']:.1f}:1  dim {r['dim']:.1f}:1  accent {r['accent']:.1f}:1 on real pixels", min(r.values()) >= 4.5, str(r))
                     if label == "red" and colors == "standard": pg.screenshot(path=f"{OUT}/63-look-{lk}.png")
 
         print("visualisers never invert")
-        for lk in ["pastel", "glass", "frost", "liquid", "flat"]:
+        for lk in ["pastel", "flat"]:
             for colors in ["standard", "vivid"]:
                 look(pg, lk, colors, wait=1200); play(pg, "Endurance", 0.6); pg.wait_for_timeout(1300)
                 pg.evaluate("import('/js/viz.js').then(m => 0)")
@@ -181,11 +180,11 @@ def run():
                     if s["mean"] > 0.28: bad.append((i, round(s["mean"], 2)))
                 corner = pg.evaluate("""() => { const c = document.querySelectorAll('#viz canvas')[2], d = c.getContext('2d').getImageData(2, 2, 1, 1).data; return [d[0], d[1], d[2]]; }""")
                 check(f"   {lk}/{colors}: every tile is a dark screen (mean brightness < .28), spectrogram background {corner}", not bad and lum(corner) < 0.06, f"{bad} {corner}")
-        look(pg, "frost", "vivid", wait=1300); play(pg, "Endurance", 0.6); pg.wait_for_timeout(1200)
-        pg.screenshot(path=f"{OUT}/64-viz-frost-vivid.png", clip=box(pg, "#viz"))
+        look(pg, "pastel", "vivid", wait=1300); play(pg, "Endurance", 0.6); pg.wait_for_timeout(1200)
+        pg.screenshot(path=f"{OUT}/64-viz-pastel-vivid.png", clip=box(pg, "#viz"))
 
         print("lyrics are readable in every look")
-        for lk in ["pastel", "glass", "frost", "liquid"]:
+        for lk in ["pastel"]:
             for colors in ["standard", "vivid"]:
                 look(pg, lk, colors, wait=1200)
                 play(pg, "Endurance", 0.3)
@@ -209,81 +208,9 @@ def run():
                 m = pixels_worst(pg, {"fg": hex2rgb(v["--ly-fg"]), "acc": hex2rgb(v["--ly-accent"]), "dim": hex2rgb(v["--ly-dim"])}, hide_extra="#fs-cover { visibility: hidden !important }", clip=box(pg, ".fs-meta"), text_boxes=True)
                 tm = pixels_worst(pg, {"dim": hex2rgb(v["--ly-dim"])}, clip=box(pg, "#fs-time"), text_boxes=True)
                 check(f"   {lk}/{colors}: fullscreen lyrics {r['fg']:.1f}:1 / {r['dim']:.1f}:1, title block {min(m.values()):.1f}:1, time {tm['dim']:.1f}:1", min(r.values()) >= 4.5 and min(m.values()) >= 4.5 and tm["dim"] >= 4.5, f"{r} {m} {tm}")
-                if colors == "standard" and lk in ("frost", "liquid"): pg.screenshot(path=f"{OUT}/66-fullscreen-{lk}.png")
+                if colors == "standard" and lk == "pastel": pg.screenshot(path=f"{OUT}/66-fullscreen-{lk}.png")
                 pg.keyboard.press("Escape"); pg.wait_for_timeout(300)
                 pg.evaluate("import('/js/lyrics.js').then(m => m.setLyricsOn(false))")
-
-        # ================================================================== liquid
-        print("liquid")
-        look(pg, "liquid", "standard", wait=1500); play(pg, "Ember", 0.8); pg.wait_for_timeout(1500)
-        info = pg.evaluate("({ shown: getComputedStyle(document.getElementById('liquid')).display, w: document.getElementById('liquid').width, h: document.getElementById('liquid').height, active: window.__prismLiquid.state.active })")
-        check("liquid look: the fluid canvas is shown and running", info["shown"] == "block" and info["w"] > 400 and info["active"] is True, str(info))
-        def fluid_sample():
-            return pg.evaluate("""() => { const c = document.getElementById('liquid'), d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; let n = 0, r = 0, g = 0, b = 0; const lowStart = Math.floor(c.height * 0.8) * c.width * 4;
-              for (let k = lowStart; k < d.length; k += 4) if (d[k + 3] > 200) { n++; r += d[k]; g += d[k + 1]; b += d[k + 2]; } return { share: n / ((d.length - lowStart) / 4), rgb: n ? [r / n, g / n, b / n] : null }; }""")
-        smp = fluid_sample()
-        check("the lower part of the window is filled with fluid", smp["share"] > 0.9, str(smp))
-        fl = pg.evaluate("window.__prism.S.theme.fluid.map(f => [f.top, f.deep].map(c => [c.r, c.g, c.b].map(x => x * 255)))")
-        hues = [hue(c) for pair in fl for c in pair]
-        check("colour inheritance: the drawn fluid has the hue of the red album's fluid colours", smp["rgb"] and min(hdist(hue(smp["rgb"]), h) for h in hues) < 0.06 and (hue(smp["rgb"]) < 0.1 or hue(smp["rgb"]) > 0.9), f"{smp} {hues}")
-        play(pg, "Tide", 0.6); pg.wait_for_timeout(2500)
-        smp2 = fluid_sample()
-        check("playing a teal album turns the fluid teal", smp2["rgb"] and 0.4 < hue(smp2["rgb"]) < 0.6 and hdist(hue(smp2["rgb"]), hue(smp["rgb"])) > 0.25, f"{smp2} vs {smp}")
-        play(pg, "Ember", 0.8); pg.wait_for_timeout(1500)
-        # shaking
-        pg.wait_for_timeout(2500)
-        base = pg.evaluate("window.__prismLiquid.sim.energy()")
-        # (a) the mouse
-        pg.evaluate("window.__maxTilt = 0; window.__tiltTimer = setInterval(() => { window.__maxTilt = Math.max(window.__maxTilt, ...Array.from(window.__prismLiquid.sim.tilt).map(Math.abs)); }, 16)")      # the water swings back and forth: look at the biggest swing, not one instant
-        for k in range(14):
-            pg.mouse.move(300 if k % 2 == 0 else 1300, 450, steps=2)
-        e1 = pg.evaluate("window.__prismLiquid.sim.energy()"); pg.wait_for_timeout(250)
-        e1 = max(e1, pg.evaluate("window.__prismLiquid.sim.energy()"))
-        check(f"shaking the mouse sloshes the fluid (energy {base:.3f} -> {e1:.3f})", e1 > base * 3 + 0.01, f"{base} {e1}")
-        pg.wait_for_timeout(600); tilt = pg.evaluate("clearInterval(window.__tiltTimer), window.__maxTilt")
-        check(f"the whole body of water tilts (biggest swing {tilt:.2f})", tilt > 0.05, str(tilt))
-        pg.screenshot(path=f"{OUT}/67-liquid-shaken.png")
-        pg.wait_for_timeout(9000)
-        e2 = pg.evaluate("window.__prismLiquid.sim.energy()")
-        check(f"and it calms down again afterwards ({e1:.3f} -> {e2:.3f})", e2 < e1 * 0.4 + 0.02, f"{e1} {e2}")
-        # (b) moving the window: window.screenX / screenY are polled
-        pg.evaluate("""() => { window.__fake = { x: 100, y: 100 }; Object.defineProperty(window, 'screenX', { get: () => window.__fake.x, configurable: true }); Object.defineProperty(window, 'screenY', { get: () => window.__fake.y, configurable: true });
-          let k = 0; window.__shaker = setInterval(() => { k++; window.__fake.x = 100 + (Math.floor(k / 6) % 2 ? 160 : -160) * ((k % 6) / 6); window.__fake.y = 100 + Math.sin(k / 3) * 30; }, 16); }""")
-        pg.wait_for_timeout(900)
-        e3 = pg.evaluate("window.__prismLiquid.sim.energy()")
-        pg.evaluate("clearInterval(window.__shaker)")
-        check(f"moving / shaking the WINDOW itself sloshes it ({e2:.3f} -> {e3:.3f})", e3 > e2 * 3 + 0.01, f"{e2} {e3}")
-        pg.wait_for_timeout(7000)
-        # (c) the menu item and a click
-        e4 = pg.evaluate("window.__prismLiquid.sim.energy()")
-        pg.click("#menubar >> text=View"); pg.click(".menu-item:has-text('Shake the liquid')"); pg.wait_for_timeout(1500)
-        e5 = pg.evaluate("window.__prismLiquid.sim.energy()")
-        check(f"View > Shake the liquid works ({e4:.3f} -> {e5:.3f})", e5 > e4 * 3 + 0.01, f"{e4} {e5}")
-        drops = pg.evaluate("window.__prismLiquid.sim.drops.length")
-        check("the vertical kick throws droplets", drops >= 0)
-        pg.wait_for_timeout(8000)
-        e6 = pg.evaluate("window.__prismLiquid.sim.energy()")
-        pg.mouse.click(1000, 886); pg.wait_for_timeout(400)
-        e7 = pg.evaluate("window.__prismLiquid.sim.energy()")
-        check(f"a click on the empty background pokes it ({e6:.3f} -> {e7:.3f})", e7 > e6 * 2 + 0.01, f"{e6} {e7}")
-        # (d) cost: this test browser draws everything in software, so absolute frame rates mean little; what matters is that the fluid does
-        #     not cost much more than the plain frosted glass it sits on (which re-blurs the backdrop on its own)
-        FPS = "new Promise(r => { let n = 0; const t0 = performance.now(); const f = () => { n++; if (performance.now() - t0 > 2000) r(n / 2); else requestAnimationFrame(f); }; requestAnimationFrame(f); })"
-        fps_liquid = pg.evaluate(FPS)
-        look(pg, "glass", "standard", wait=1800); fps_glass = pg.evaluate(FPS)
-        look(pg, "liquid", "standard", wait=1800)
-        check(f"the fluid, which never stands completely still, costs a bounded amount on top of still frosted glass ({fps_liquid:.0f} fps vs {fps_glass:.0f} fps, software-rendered test browser)", fps_liquid >= fps_glass * 0.45 and fps_liquid >= 5, f"{fps_liquid} {fps_glass}")
-        # off again
-        look(pg, "flat", "standard", wait=1200)
-        off = pg.evaluate("({ active: window.__prismLiquid.state.active, raf: window.__prismLiquid.state.raf, display: getComputedStyle(document.getElementById('liquid')).display })")
-        check("with another look the fluid stops completely (no animation loop, canvas hidden)", off["active"] is False and off["raf"] == 0 and off["display"] == "none", str(off))
-        look(pg, "liquid", "mono", wait=1200)
-        check("Black and white is always flat, so no fluid", pg.evaluate("window.__prismLiquid.state.active") is False)
-        look(pg, "liquid", "standard", wait=1200)
-        check("the menu entry is disabled outside the liquid look", True)
-        look(pg, "flat", "standard", wait=900)
-        pg.click("#menubar >> text=View"); dis = pg.locator(".menu-item:has-text('Shake the liquid')").get_attribute("class"); pg.keyboard.press("Escape")
-        check("'Shake the liquid' is greyed out in other looks", "disabled" in (dis or ""), str(dis))
 
         # ================================================================== square corners
         print("square corners")
@@ -315,14 +242,14 @@ def run():
         pg.evaluate("import('/js/state.js').then(m => m.saveNow())"); pg.wait_for_timeout(400)
         pg.reload(); pg.wait_for_function("() => window.__prism && window.__prism.S.list.length === 16", timeout=15000); pg.wait_for_timeout(800)
         check("square corners survive a restart", pg.evaluate("document.documentElement.dataset.square") == "1" and pg.evaluate(PROBE)["panel"] == "0px")
-        for lk in ["pastel", "frost", "glass", "liquid"]:
+        for lk in ["pastel"]:
             look(pg, lk, "standard", wait=900)
             check(f"   square corners work with the {lk} look", pg.evaluate(PROBE)["panel"] == "0px" and pg.evaluate(PROBE)["viz"] == "0px")
         look(pg, "flat", "standard", square=False, wait=900)
 
         # ================================================================== the VU meter
         print("VU meter")
-        look(pg, "frost", "vivid", wait=1200); play(pg, "Endurance", 0.8)
+        look(pg, "pastel", "vivid", wait=1200); play(pg, "Endurance", 0.8)
         for i, vid in enumerate(["vu", "spectrum", "xy", "meter"]):
             pg.evaluate("document.querySelectorAll('#viz .vz')[%d].dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 100, clientY: 800 }))" % i); pg.wait_for_selector(".menu")
             pg.click(f".menu-item:has-text('{ {'vu': 'VU needles', 'spectrum': 'Spectrum bars', 'xy': 'Stereo phase scope', 'meter': 'Level meters'}[vid] }')"); pg.wait_for_timeout(200)
@@ -336,7 +263,7 @@ def run():
         check(f"the needles and the backlight move with the music ({changed * 100:.1f} % of the pixels changed between playing and paused)", changed > 0.004, str(changed))
         pg.click("#b-play"); pg.wait_for_timeout(1500)
         pg.screenshot(path=f"{OUT}/70-vu.png", clip=box(pg, "#viz"))
-        for lk in ["flat", "pastel", "glass", "liquid"]:
+        for lk in ["flat", "pastel"]:
             look(pg, lk, "standard", wait=1000); pg.wait_for_timeout(900)
             check(f"   VU meters in the {lk} look keep the dark screen", canvas_stats(pg, 0)["mean"] < 0.4)
 

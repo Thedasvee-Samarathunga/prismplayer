@@ -192,5 +192,7 @@ export const isRecapOpen = () => open;
 export function initRecap() {
   refreshChip();
   setInterval(refreshChip, 5 * 60 * 1000);
-  on('settings', refreshChip);
+  const acct = () => { const l = (S.settings.scrobble || {}).lastfm || {}; return [l.apiKey, l.user, (S.settings.recap || {}).user].join('|'); };
+  let lastAcct = acct();
+  on('settings', () => { const k = acct(); if (k !== lastAcct) { lastAcct = k; refreshChip(); } });
 }

@@ -1,9 +1,10 @@
 // Applies the album-art theme: extracts a palette from the cover, builds a readable theme, sets CSS variables.
-// Settings: colours (album standard / album vivid / black & white), look (flat / pastel / frosted glass / frosted pastel / liquid) and square corners.
+// Settings: colours (album standard / album vivid / black & white), look (flat / pastel) and square corners.
 // Colours always come from the album.
 import { api } from './api.js';
 import { S, emit, on } from './state.js';
-import { buildTheme, defaultTheme, extractPalette, toHex, checkTheme, LOOKS, BLURS, liquidColours } from './color.js';
+import { buildTheme, defaultTheme, extractPalette, toHex, checkTheme } from './color.js';
+import { bakeBlur } from './backdrop.js';
 
 const CSS_VAR = {
   bg: '--bg', bg2: '--bg2', panel: '--panel', panel2: '--panel2', border: '--border',
@@ -14,16 +15,17 @@ const CSS_VAR = {
 const paletteCache = new Map();
 let token = 0;
 
-/** The effective style from the settings. Older settings (dynamicColors=false) mean black & white. */
+/** The effective style from the settings. Older settings (dynamicColors=false) mean black & white.
+ *  2.0.2: the see-through looks (frosted glass, frosted pastel, liquid) and the background blur are gone (they made the text soft and kept the GPU busy).
+ *  A saved choice of one of them becomes its solid sibling: glass -> flat, frost -> pastel, liquid -> flat; the blur is always off. */
+const LOOK_MAP = { flat: 'flat', pastel: 'pastel', glass: 'flat', frost: 'pastel', liquid: 'flat' };
 export function styleOf(settings) {
   const a = (settings && settings.appearance) || {};
   let colors = a.colors === 'vivid' ? 'vivid' : a.colors === 'mono' ? 'mono' : 'standard';
   if (settings && settings.dynamicColors === false) colors = 'mono';
-  const look = colors === 'mono' ? 'flat' : (LOOKS.includes(a.look) ? a.look : 'flat');
-  const blur = colors === 'mono' || look === 'liquid' ? 'off' : (BLURS.includes(a.blur) ? a.blur : 'off');
-  return { colors, look, blur, square: !!a.square };
+  const look = colors === 'mono' ? 'flat' : (LOOK_MAP[a.look] || 'flat');
+  return { colors, look, blur: 'off', square: !!a.square, perf: ['smooth', 'balanced', 'light'].includes(a.perf) ? a.perf : 'balanced' };
 }
-
 /** Square corners: every element loses its rounding (CSS reads html[data-square]; the canvas visualisers read the same flag). */
 export function applyShape(settings) {
   const sq = !!(settings && settings.appearance && settings.appearance.square);
@@ -46,16 +48,12 @@ export function applyTheme(t) {
   const glass = t.glass == null ? 1 : t.glass, mg = t.menuGlass == null ? 1 : t.menuGlass;
   rs.setProperty('--panel-bg', glass < 1 ? rgba(t.panel, glass) : toHex(t.panel));
   rs.setProperty('--menu-bg', mg < 1 ? rgba(t.panel, mg) : toHex(t.panel));
-  const blurOn = t.blur && t.blur !== 'off';
-  rs.setProperty('--blur', glass < 1 ? (t.look === 'liquid' ? '0px' : (blurOn && (t.look === 'flat' || t.look === 'pastel') ? '10px' : '22px')) : '0px');          // 'mild' blur for the see-through flat / pastel panels
-  rs.setProperty('--layer-blur', blurOn && t.blur === 'cover' ? '22px' : '70px');           // the album cover behind everything: mildly blurred when the background blur is on
-  { const fl = liquidColours(t, 3); for (let i = 0; i < 3; i++) rs.setProperty(`--fl${i + 1}`, toHex(fl[i % fl.length].top)); }       // the colour field of the 'colours' blur          // the liquid look blurs its fluid canvas once instead
+  rs.setProperty('--blur', '0px');
   rs.setProperty('--bd-alpha', String(bd.a)); rs.setProperty('--bd-bright', String(bd.max)); rs.setProperty('--wash', String(bd.wash || 0));
   // lyrics (cover overlay + fullscreen) are light text on a dark shade over the darkened cover in EVERY look; the visualiser tiles are always dark screens
   const ly = t.ly || { bg: t.bg, bg2: t.bg2, fg: t.fg, dim: t.dim, accent: t.accent, onAccent: t.onAccent }, viz = t.viz || { panel: t.panel };
   rs.setProperty('--cover-lyr-filter', 'blur(15px) brightness(.5) saturate(1.1)');
   rs.setProperty('--cover-shade-bg', rgba(ly.bg, ov.shade));
-  rs.setProperty('--fs-filter', 'blur(11px) brightness(.62) saturate(1.1)');
   rs.setProperty('--fs-scrim', rgba(ly.bg, ov.fs));
   rs.setProperty('--fs-scrim-end', rgba(ly.bg, 0.1));
   rs.setProperty('--ly-bg', toHex(ly.bg)); rs.setProperty('--ly-fg', toHex(ly.fg)); rs.setProperty('--ly-dim', toHex(ly.dim));
@@ -112,21 +110,24 @@ function setBackdrop(url) {
   layer = el;
   requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('on')));
 }
-
 export async function themeForTrack(track) {
   const my = ++token;
   const st = styleOf(S.settings);
-  if (!track || st.colors === 'mono') { applyTheme(defaultTheme(st.look, st.blur)); setBackdrop(null); return; }
+  if (!track || st.colors === 'mono') { applyTheme(defaultTheme(st.look, 'off')); setBackdrop(null); return; }
   const pal = await loadPalette(track, st.colors === 'vivid');
   if (my !== token) return;                                   // a newer track was started meanwhile
-  if (!pal || !pal.length) { applyTheme(defaultTheme(st.look, st.blur)); setBackdrop(null); return; }
-  applyTheme(buildTheme(pal, { mode: st.colors, look: st.look, blur: st.blur }));
-  setBackdrop(st.blur === 'colours' ? null : api.coverUrl(track.id, st.blur === 'cover' ? 640 : 300));       // the colour field needs no picture
+  if (!pal || !pal.length) { applyTheme(defaultTheme(st.look, 'off')); setBackdrop(null); return; }
+  const theme = buildTheme(pal, { mode: st.colors, look: st.look, blur: 'off' });
+  applyTheme(theme);
+  // the blurred cover behind the window: made once (a 32 px version, more colourful and darker; never brighter than the theme's contrast model assumes), then just stretched
+  const bright = theme.backdrop && theme.backdrop.max != null ? theme.backdrop.max : 0.55;
+  const url = await bakeBlur(api.coverUrl(track.id, 160), { size: 32, saturate: 1.5, brightness: Math.min(1, bright) });
+  if (my !== token) return;
+  setBackdrop(url);
 }
-
 export function initTheme() {
   applyShape(S.settings);
-  { const st0 = styleOf(S.settings); applyTheme(defaultTheme(st0.look, st0.blur)); }
+  { const st0 = styleOf(S.settings); applyTheme(defaultTheme(st0.look, 'off')); }
   on('nowplaying', ({ track }) => themeForTrack(track));
   on('settings', () => { applyShape(S.settings); if (window.__prismCurrentTrack) themeForTrack(window.__prismCurrentTrack()); });
 }

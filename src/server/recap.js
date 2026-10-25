@@ -375,7 +375,15 @@ class RecapService {
   }
 
   // ---------------------------------------------------------------- scrobble history
-  analytics() { return computeAnalytics(this.hist, this.now()); }
+  // The numbers are worked out from the whole history (every day, every artist): done again only when the history, the day or the sync state changed.
+  // (The recap badge and the play-count refresh ask for them often.)
+  analytics() {
+    const h = this.hist, key = `${h.total}|${h.newestTs}|${h.full ? 1 : 0}|${h.updatedAt}|${dayKey(this.now())}|${Object.keys(h.artists).length}`;
+    if (this._an && this._an.key === key && this._an.h === h) return this._an.val;
+    const val = computeAnalytics(h, this.now());
+    this._an = { key, h, val };
+    return val;
+  }
   historyStatus() { return Object.assign({}, this.status, { scrobbles: this.hist.total, full: this.hist.full, updatedAt: this.hist.updatedAt, user: this.hist.user }); }
   lite() {
     const a = this.analytics(), i = this.info();
@@ -487,7 +495,7 @@ class RecapService {
       h.cursor = { to, page };
       st.scrobbles = h.total;
       if (page > totalPages || page > this.maxPages) { if (page > this.maxPages && page <= totalPages) h.truncated = true; break; }
-      if (page % 5 === 0 && !this._reindex) { this.histStore.set(h); this.histStore.saveNow(); }
+      if (page % 5 === 0 && !this._reindex) this.histStore.set(h);                      // saved in the background (a big history written synchronously stalled the server on every fifth page)
     }
     this._prune();
     h.full = true; h.cursor = null;

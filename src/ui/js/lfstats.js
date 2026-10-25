@@ -42,7 +42,10 @@ export function initLfStats() {
   const kick = (force) => { syncLf(force).catch(() => {}); };
   kick(false);
   pollTimer = setInterval(() => kick(false), 15 * 60 * 1000);
-  on('settings', () => kick(false));
+  // only a change of the Last.fm account matters here (every settings save, e.g. dragging an EQ slider, used to refresh all the numbers)
+  const acct = () => { const l = (S.settings.scrobble || {}).lastfm || {}; return [l.apiKey, l.user, (S.settings.recap || {}).user].join('|'); };
+  let lastAcct = acct();
+  on('settings', () => { const k = acct(); if (k !== lastAcct) { lastAcct = k; kick(false); } });
   on('library', () => { if (lfReady() || (S.lf && S.lf.user)) refreshLfStats(); });
   // a scrobble of ours reaches Last.fm within seconds: look again shortly after, so the count of the song just played goes up
   on('scrobble', () => { clearTimeout(scrobbleTimer); scrobbleTimer = setTimeout(() => kick(true), 30 * 1000); });

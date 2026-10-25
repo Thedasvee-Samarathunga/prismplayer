@@ -38,7 +38,7 @@ class HeadCache {
     if (this.inflight.has(k)) return this.inflight.get(k);
     const job = this._chain.then(async () => {
       if (!this.enabled || this.has(track, rate) || !fs.existsSync(track.path)) return false;
-      const dec = new Decoder(track, 0, rate), want = headFrames(rate), parts = []; let frames = 0;
+      const dec = new Decoder(track, 0, rate, { low: true }), want = headFrames(rate), parts = []; let frames = 0;
       try {
         for await (const b of dec.chunks()) { parts.push(b); frames += b.length / BYTES_PER_FRAME; if (frames >= want) break; }
       } finally { dec.kill(); }

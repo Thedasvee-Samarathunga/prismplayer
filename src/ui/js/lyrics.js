@@ -8,6 +8,7 @@ import { fmtTime, escapeHtml, displayArtist } from './fmt.js';
 import { ICON } from './icons.js';
 import { indexAt, stateOf, sourceLabel } from './lyriclogic.js';
 import { toast } from './dialogs.js';
+import { bakeBlur } from './backdrop.js';
 
 export const LY = { track: null, data: null, state: 'idle', error: '' };   // idle | loading | lines | none | instrumental | error
 const views = new Set();
@@ -114,7 +115,7 @@ function ensureLoaded() {
 }
 
 // ------------------------------------------------------------------------------------ the loop that follows playback
-function kick() { if (!raf && (wanted())) raf = requestAnimationFrame(tick); }
+function kick() { if (!raf && (wanted())) raf = setTimeout(tick, 66); }       // about 15 updates a second is plenty for following a line of lyrics and a time display
 function tick() {
   raf = 0;
   if (!wanted()) return;
@@ -124,13 +125,13 @@ function tick() {
   }
   if (fsOpen) {
     const d = P.cur ? (engine.duration || P.cur.track.duration || 0) : 0, pos = P.cur ? engine.position : 0;
-    fsEls.time.textContent = `${fmtTime(pos)} / ${fmtTime(d)}`;
-    fsEls.fill.style.width = (d ? Math.min(100, (pos / d) * 100) : 0) + '%';
-    fsEls.thumb.style.left = fsEls.fill.style.width;
+    const text = `${fmtTime(pos)} / ${fmtTime(d)}`;
+    if (fsEls.time.textContent !== text) fsEls.time.textContent = text;
+    const w = (d ? Math.min(100, Math.round((pos / d) * 2000) / 20) : 0) + '%';
+    if (fsEls.fill.style.width !== w) { fsEls.fill.style.width = w; fsEls.thumb.style.left = w; }
   }
-  if (P.state === 'playing' || fsOpen) raf = requestAnimationFrame(tick);
+  if (P.state === 'playing' || fsOpen) kick();
 }
-
 // ------------------------------------------------------------------------------------ cover overlay
 export function setLyricsOn(on_) {
   S.layout.lyrics = !!on_;
@@ -160,10 +161,12 @@ function setFsMeta(track) {
   if (fsEls.root.dataset.cover !== url) {
     fsEls.root.dataset.cover = url;
     fsEls.root.classList.add('no-art');
-    const img = new Image();
-    img.onload = () => { if (fsEls.root.dataset.cover === url) { fsEls.bg.style.backgroundImage = `url("${url}")`; fsEls.cover.src = url; fsEls.root.classList.remove('no-art'); } };
-    img.onerror = () => { if (fsEls.root.dataset.cover === url) { fsEls.bg.style.backgroundImage = ''; fsEls.cover.removeAttribute('src'); } };
-    img.src = url;
+    // the slightly blurred, darkened background is made once on a small canvas (a 192 px version stretched over the screen), not by a screen-sized CSS blur filter
+    bakeBlur(url, { size: 192, saturate: 1.1, brightness: 0.62 }).then((baked) => {
+      if (fsEls.root.dataset.cover !== url) return;
+      if (!baked) { fsEls.bg.style.backgroundImage = ''; fsEls.cover.removeAttribute('src'); return; }
+      fsEls.bg.style.backgroundImage = `url("${baked}")`; fsEls.cover.src = url; fsEls.root.classList.remove('no-art');
+    });
   }
 }
 
