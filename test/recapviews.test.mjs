@@ -1,3 +1,4 @@
+import { summaryFacts, summaryCard } from '../src/ui/js/recapviews.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { streakCard, statCards, topList, albumGrid, barsChart, trendsView, calendarHeat, weekHourHeat, highlights, artistOfMonth, chartsView, genresView, recentList, setupCard, level, fmtDay, fmtRange, fmtHour, pct, nf } from '../src/ui/js/recapviews.js';
@@ -71,4 +72,67 @@ test('highlights, artist of the month, weekly charts, genres, recent list and th
 test('formatting helpers', () => {
   assert.equal(fmtDay('2026-08-05'), '5 Aug 2026'); assert.equal(fmtDay('2026-08-05', false), '5 Aug'); assert.equal(fmtRange('2026-08-20', '2026-09-30'), '20 Aug – 30 Sep 2026'); assert.equal(fmtRange('2025-12-20', '2026-01-02'), '20 Dec 2025 – 2 Jan 2026');
   assert.deepEqual([fmtHour(0), fmtHour(9), fmtHour(12), fmtHour(21), fmtHour(-1)], ['12 AM', '9 AM', '12 PM', '9 PM', '']); assert.equal(nf(1234567), '1,234,567');
+});
+
+// ---------------------------------------------------------------------------------------------------- the summary of a time frame
+const plain = (f) => f.paragraphs.map((p) => p.map((x) => (x.b != null ? x.b : x.t)).join('')).join('\n');
+const PERIOD = { days: 7, from: '2026-10-19', to: '2026-10-25', scrobbles: 120, activeDays: 6, avgPerDay: 17.1, avgPerActiveDay: 20, best: { day: '2026-10-24', count: 41 }, longestStreak: { len: 3, start: '2026-10-19', end: '2026-10-21' }, weekdays: [10, 12, 9, 8, 15, 40, 26], busiestWeekday: 5, prev: 96, change: 25, newArtists: 3, newArtistNames: ['Evening Choir', 'Brand New Band', 'Third Act'] };
+const A = (p = PERIOD, id = '7day') => ({ synced: true, periods: { [id]: p } });
+const SUM = { topArtists: [{ name: 'Lantern Club', plays: 34 }, { name: 'Harbour Lights', plays: 20 }, { name: 'Paper Boats', plays: 11 }], topArtistsTotal: 40, topAlbums: [{ name: 'Tides', artist: 'Lantern Club', plays: 12 }], topTracks: [{ name: 'Song A', artist: 'Lantern Club', plays: 9 }] };
+const GEN = { genres: [{ name: 'ambient', share: 41.2 }, { name: 'folk', share: 22.6 }, { name: 'jazz', share: 9 }, { name: 'rock', share: 5 }] };
+
+test('summary: the sentences use the numbers of exactly the chosen time frame', () => {
+  const f = summaryFacts('7day', A(), SUM, GEN), t = plain(f);
+  assert.match(t, /^In the last 7 days you played 120 scrobbles, listening on 6 of 7 days \(about 20 on the days you did\)\./);
+  assert.match(t, /That is 25% more than the 7 days before \(96\)\./);
+  assert.match(t, /Lantern Club was your most played artist \(34 plays, 28% of everything\), followed by Harbour Lights and Paper Boats\./);
+  assert.match(t, /Your top album was Tides by Lantern Club, and the song you played most was Song A by Lantern Club \(9 plays\)\./);
+  assert.match(t, /Your busiest day was 24 Oct 2026 with 41 scrobbles\./);
+  assert.ok(!/You listen most on/.test(t), 'a weekday pattern needs at least two weeks of data');
+  assert.match(t, /Your longest run was 3 days in a row/);
+  assert.match(t, /You discovered 3 new artists, including Evening Choir, Brand New Band and Third Act\./);
+  assert.match(t, /Your sound was mostly ambient \(41%\), folk \(23%\) and jazz \(9%\)\./);
+  assert.equal(f.paragraphs.length, 3);
+});
+
+test('summary: every time frame has its own wording; all time has no "before"; less than before; same as before; a quiet period', () => {
+  const phrases = { '7day': 'In the last 7 days', '1month': 'In the last month', '3month': 'In the last 3 months', '6month': 'In the last 6 months', '12month': 'In the last year', overall: 'Across all your listening' };
+  for (const [id, ph] of Object.entries(phrases)) assert.ok(plain(summaryFacts(id, A({ ...PERIOD, days: id === 'overall' ? 900 : 30 }, id), SUM, GEN)).startsWith(ph), id);
+  const all = plain(summaryFacts('overall', A({ ...PERIOD, days: 900, scrobbles: 5000, prev: null, change: null }, 'overall'), SUM, GEN));
+  assert.match(all, /5,000 scrobbles over 900 days, on 6 of 900 days/); assert.ok(!/than the/.test(all));
+  assert.match(plain(summaryFacts('7day', A({ ...PERIOD, change: -40, prev: 200 }), SUM, GEN)), /40% less than the 7 days before \(200\)/);
+  assert.match(plain(summaryFacts('7day', A({ ...PERIOD, change: 0, prev: 120 }), SUM, GEN)), /the same as the 7 days before/);
+  assert.match(plain(summaryFacts('1month', A({ ...PERIOD, days: 30, prev: 0, change: null }, '1month'), SUM, GEN)), /did not listen at all in the period before/);
+  const quiet = summaryFacts('7day', A({ ...PERIOD, scrobbles: 0, activeDays: 0, best: { day: null, count: 0 }, longestStreak: { len: 0 }, newArtists: 0, newArtistNames: [], prev: 5, change: -100 }), { topArtists: [] }, null);
+  assert.equal(plain(quiet), 'In the last 7 days you did not scrobble anything. ');
+  assert.ok(plain(summaryFacts('3month', A({ ...PERIOD, days: 90 }, '3month'), SUM, GEN)).includes('You listen most on Saturdays'), 'with 14+ days the favourite weekday is mentioned');
+});
+
+test('summary: missing pieces are left out, never "undefined" or NaN; works with the API data alone; escapes names', () => {
+  const noHist = summaryFacts('7day', { synced: false, periods: {} }, SUM, null), t = plain(noHist);
+  assert.match(t, /your top artists alone had 65 plays/); assert.match(t, /Lantern Club was your most played artist \(34 plays\)/); assert.ok(!/% of everything/.test(t));
+  assert.deepEqual(noHist.chips.map((c) => c.label), ['Artists']);
+  const nothing = summaryFacts('7day', null, null, null); assert.equal(nothing.empty, true);
+  for (const f of [summaryFacts('7day', A(), null, null), summaryFacts('7day', A(), { topArtists: [{ name: 'X', plays: 999 }] }, { genres: [] })]) { const x = plain(f) + JSON.stringify(f.chips); assert.ok(!/undefined|NaN|null|\[object/.test(x), x); }
+  const share = plain(summaryFacts('7day', A(), { topArtists: [{ name: 'X', plays: 999 }] }, null)); assert.ok(!/% of everything/.test(share), 'a share above 100 % is not shown');
+  const html = summaryCard('7day', A(), { topArtists: [{ name: '<img src=x onerror=alert(1)>', plays: 3 }] }, null);
+  assert.ok(!/<img/.test(html) && html.includes('&lt;img'));
+});
+
+test('summary: the stat chips are the numbers of the frame', () => {
+  const f = summaryFacts('7day', A(), SUM, GEN), by = Object.fromEntries(f.chips.map((c) => [c.label, c]));
+  assert.deepEqual([by['Scrobbles'].value, by['Scrobbles'].sub], ['120', '17.1 a day']);
+  assert.deepEqual([by['Active days'].value, by['Active days'].sub], ['6/7', '86% of days']);
+  assert.deepEqual([by['Compared with before'].value, by['Compared with before'].tone], ['+25%', 'up']);
+  assert.equal(by['New artists'].value, '3'); assert.equal(by['Longest run'].value, '3 days'); assert.equal(by['Busiest day'].value, '41');
+  const down = summaryFacts('7day', A({ ...PERIOD, change: -10, prev: 133 }), SUM, GEN).chips.find((c) => c.label === 'Compared with before'); assert.deepEqual([down.value, down.tone], ['-10%', 'down']);
+  assert.ok(!summaryFacts('overall', A({ ...PERIOD, prev: null, change: null }, 'overall'), SUM, GEN).chips.some((c) => c.label === 'Compared with before'));
+});
+
+test('summary card: heading names the frame, chips and paragraphs render, a waiting note appears while the history downloads, the empty states are readable', () => {
+  const html = summaryCard('1month', A({ ...PERIOD, days: 30 }, '1month'), SUM, GEN);
+  assert.ok(html.includes('Summary') && html.includes('1 month') && html.includes('rc-chips2') && html.includes('rc-story') && (html.match(/<p>/g) || []).length === 3);
+  assert.ok(summaryCard('7day', { synced: false, periods: {} }, SUM, null).includes('history has been downloaded'));
+  assert.ok(summaryCard('7day', { synced: false }, null, null).includes('appears once your listening history'));
+  assert.ok(summaryCard('7day', A({ ...PERIOD, scrobbles: 0, activeDays: 0, best: { day: null, count: 0 }, longestStreak: { len: 0 }, newArtists: 0, newArtistNames: [], prev: 0, change: null }), { topArtists: [] }, null).includes('did not scrobble'));
 });

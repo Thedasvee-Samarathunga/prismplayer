@@ -28,6 +28,7 @@ const DEFAULT_SETTINGS = {
   rg: { preamp: 0, fallback: 0, preventClipping: true },
   output: { mode: 'web', webDeviceId: '', deviceId: '', matchRate: true, bits: 0, bufferMs: 0 },   // mode: web | exclusive | shared
   eq: { enabled: false, preamp: 0, gains: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], preset: 'Flat', autoPreamp: true },
+  dj: { on: false, mode: 'all', genres: [], style: 'balanced', crossfade: 6 },      // the music DJ (ribbon): what to mix, how, and how long tracks overlap
   cache: { prefetch: true, maxHeadMB: 1024, maxCoverMB: 256 },   // smart caching: pre-decoded track starts, cover thumbnails
   hotkeys: {},                 // action id -> key combination ('' = unassigned); see ui/js/hotkeys.js
   hotkeyGlobal: false,         // register the global ones system-wide (desktop app)
@@ -132,7 +133,9 @@ async function startServer(opts) {
   const scrobbler = new Scrobbler({ dataDir, getSettings, saveSettings, lastfmRoot: opts.lastfmRoot, lbRoot: opts.lbRoot });
   const lyrics = new LyricsService({ dataDir, getSettings, lrclibRoot: opts.lrclibRoot });
   const recap = new RecapService(Object.assign({ dataDir, getSettings, lastfmRoot: opts.lastfmRoot }, opts.recap || {}));
-  const native = new NativeEngine({ library, bin: opts.audioHelper, heads });
+  // The DJ's auto-mix: while the DJ is on, tracks overlap by this many seconds (0 = plain gapless). Read live, so the slider takes effect on the next track.
+  const djCrossfade = () => { const d = getSettings().dj || {}; return d.on ? Math.max(0, Math.min(12, Number(d.crossfade) || 0)) : 0; };
+  const native = new NativeEngine({ library, bin: opts.audioHelper, heads, crossfade: djCrossfade });
   const sseClients = new Set();
   native.on('event', (ev) => { const line = `data: ${JSON.stringify(ev)}\n\n`; for (const r of sseClients) r.write(line); });
   const streams = new Map();   // sid -> {next, close}
@@ -188,7 +191,7 @@ async function startServer(opts) {
     const dataStart = Math.max(start, 44) - 44;
     const frame = Math.floor(dataStart / plan.blockAlign);
     let skip = dataStart - frame * plan.blockAlign;
-    const proc = ff.spawnPcm(track.path, plan, frame / plan.rate);
+    const proc = ff.spawnPcm(track.path, plan, frame / plan.rate, track.cue ? { start: track.cueStart, end: track.cueEnd } : null);
     let sent = 0;
     let stderr = '';
     proc.stderr.on('data', (d) => { if (stderr.length < 2000) stderr += d; });
@@ -241,7 +244,7 @@ async function startServer(opts) {
     res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no' });
     sess.gen = feed({
       library, heads, first: { id: track.id, tag: q.get('tag') || '', gain: isFinite(g) ? g : 1, startSec: Math.max(0, parseFloat(q.get('start')) || 0) },
-      rateFor: () => rate, getNext: () => sess.next, takeNext: () => { const n = sess.next; sess.next = null; return n; },
+      rateFor: () => rate, getNext: () => sess.next, takeNext: () => { const n = sess.next; sess.next = null; return n; }, crossfade: djCrossfade,
     });
     res.on('close', () => { sess.closed = true; sess.gen.return().catch(() => {}); if (streams.get(sid) === sess) streams.delete(sid); });
     for await (const ev of sess.gen) {
@@ -265,7 +268,7 @@ async function startServer(opts) {
   async function coverFor(track, size) {
     let key, loader, folderFile = null;
     if (track.hasCover) {
-      key = `emb|${track.id}|${track.mtime}|${track.size}|${size || 0}`;
+      key = `emb|${track.parentId || track.id}|${track.mtime}|${track.size}|${size || 0}`;      // the tracks of a cue sheet share the cover of their file
       loader = () => ff.extractEmbeddedCover(track.path, size);
     } else {
       folderFile = await ff.findFolderCover(path.dirname(track.path));
@@ -364,7 +367,7 @@ async function startServer(opts) {
       if (e.name.startsWith('.')) continue;
       const full = path.join(p, e.name);
       if (e.isDirectory()) dirs.push({ name: e.name, path: full });
-      else if (e.isFile() && ff.isAudioFile(e.name)) files.push({ name: e.name, path: full });
+      else if (e.isFile() && (ff.isAudioFile(e.name) || ff.isCueFile(e.name))) files.push({ name: e.name, path: full });
     }
     const byName = (a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
     dirs.sort(byName); files.sort(byName);
@@ -422,6 +425,7 @@ async function startServer(opts) {
         return sendJson(res, library.recordPlay(b.id, b.at));
       }
       case '/api/recap/state': return sendJson(res, recap.lite());
+      case '/api/recap/trackstats': return sendJson(res, recap.trackStats(library.list()));     // play count / first / last played of every library song, from Last.fm
       case '/api/recap/summary': case '/api/recap/genres': case '/api/recap/charts': {
         try {
           if (p.endsWith('summary')) return sendJson(res, await recap.summary(q.get('period') || 'overall'));

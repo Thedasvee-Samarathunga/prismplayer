@@ -21,6 +21,89 @@ export const flameIcon = FLAME;
 // intensity 0..4 for heat maps
 export const level = (n, max) => (!n ? 0 : Math.min(4, 1 + Math.floor((n / Math.max(1, max)) * 3.999)));
 
+// ------------------------------------------------------------------------------------ summary of the chosen time frame
+const PERIOD_PHRASE = { '7day': 'In the last 7 days', '1month': 'In the last month', '3month': 'In the last 3 months', '6month': 'In the last 6 months', '12month': 'In the last year', overall: 'Across all your listening' };
+const PERIOD_BEFORE = { '7day': 'the 7 days before', '1month': 'the 30 days before', '3month': 'the 90 days before', '6month': 'the 180 days before', '12month': 'the year before' };
+const listNames = (names) => (names.length <= 1 ? names.join('') : names.slice(0, -1).join(', ') + ' and ' + names[names.length - 1]);
+
+/**
+ * The facts and sentences of the summary for one time frame.
+ *  a = analytics (with .periods, from the local history), sum = the API summary of that period (tops), genres = the genre list of that period.
+ * Returns { paragraphs: [[{t:'text'}|{b:'bold'}...]], chips: [{label, value, sub}], empty }. Pieces that are not available are left out.
+ */
+export function summaryFacts(period, a, sum, genres) {
+  const P = a && a.periods && a.periods[period];
+  const paras = [], chips = [];
+  const T = (t) => ({ t }), B = (b) => ({ b: String(b) });
+  const phrase = PERIOD_PHRASE[period] || PERIOD_PHRASE.overall;
+  const hasHist = !!(P && a.synced);
+
+  // ---- 1. how much
+  const p1 = [];
+  if (hasHist && P.scrobbles > 0) {
+    p1.push(T(`${phrase} you played `), B(plural(P.scrobbles, 'scrobble')), T(period === 'overall' ? ` over ${plural(P.days, 'day')}, on ` : `, listening on `), B(`${nf(P.activeDays)} of ${nf(P.days)} days`));
+    p1.push(T(P.avgPerActiveDay ? ` (about ${P.avgPerActiveDay} on the days you did)` : ''), T('. '));
+    if (P.change != null && P.prev > 0) {
+      const before = PERIOD_BEFORE[period] || 'the period before';
+      if (P.change === 0) p1.push(T(`That is the same as ${before}. `));
+      else p1.push(T(`That is `), B(`${Math.abs(P.change)}% ${P.change > 0 ? 'more' : 'less'}`), T(` than ${before} (${nf(P.prev)}). `));
+    } else if (period !== 'overall' && P.prev === 0 && P.scrobbles > 0) p1.push(T('You did not listen at all in the period before. '));
+  } else if (hasHist) {
+    p1.push(T(`${phrase} you did not scrobble anything. `));
+  } else if (sum && sum.topArtists && sum.topArtists.length) {
+    const total = sum.topArtists.reduce((x, y) => x + y.plays, 0);
+    p1.push(T(`${phrase} your top artists alone had `), B(plural(total, 'play')), T('. '));
+  }
+  if (p1.length) paras.push(p1);
+
+  // ---- 2. favourites
+  const p2 = [], ta = sum && sum.topArtists || [], tal = sum && sum.topAlbums || [], tt = sum && sum.topTracks || [];
+  const base = hasHist && P.scrobbles > 0 ? P.scrobbles : 0;
+  if (ta.length) {
+    const t = ta[0], share = base && t.plays <= base ? Math.round((t.plays / base) * 100) : null;
+    p2.push(B(t.name), T(` was your most played artist (${plural(t.plays, 'play')}${share != null ? `, ${share}% of everything` : ''})`));
+    const rest = ta.slice(1, 3).map((x) => x.name);
+    p2.push(T(rest.length ? `, followed by ${listNames(rest)}. ` : '. '));
+  }
+  if (tal.length) p2.push(T('Your top album was '), B(tal[0].name), T(tal[0].artist ? ` by ${tal[0].artist}` : ''), T(tt.length ? ', ' : '. '));
+  if (tt.length) p2.push(T(tal.length ? 'and the song you played most was ' : 'The song you played most was '), B(tt[0].name), T(tt[0].artist ? ` by ${tt[0].artist}` : ''), T(` (${plural(tt[0].plays, 'play')}). `));
+  if (p2.length) paras.push(p2);
+
+  // ---- 3. rhythm, discovery, genres
+  const p3 = [];
+  if (hasHist && P.scrobbles > 0) {
+    if (P.best.day && P.activeDays > 1) p3.push(T('Your busiest day was '), B(fmtDay(P.best.day)), T(` with ${plural(P.best.count, 'scrobble')}. `));
+    if (P.busiestWeekday >= 0 && P.days >= 14) p3.push(T('You listen most on '), B(WEEKDAYS[P.busiestWeekday] + 's'), T('. '));
+    if (P.longestStreak.len >= 2) p3.push(T('Your longest run was '), B(plural(P.longestStreak.len, 'day')), T(` in a row (${fmtRange(P.longestStreak.start, P.longestStreak.end)}). `));
+    if (P.newArtists > 0) { const names = (P.newArtistNames || []).slice(0, 3); p3.push(T('You discovered '), B(plural(P.newArtists, 'new artist')), T(names.length ? `, including ${listNames(names)}. ` : '. ')); }
+  }
+  const gl = genres && genres.genres ? genres.genres.slice(0, 3) : [];
+  if (gl.length) p3.push(T('Your sound was mostly '), B(listNames(gl.map((g) => `${g.name} (${Math.round(g.share)}%)`))), T('. '));
+  if (p3.length) paras.push(p3);
+
+  // ---- chips
+  if (hasHist) {
+    chips.push({ label: 'Scrobbles', value: nf(P.scrobbles), sub: P.avgPerDay ? `${P.avgPerDay} a day` : '' });
+    chips.push({ label: 'Active days', value: `${nf(P.activeDays)}/${nf(P.days)}`, sub: P.days ? `${Math.round((P.activeDays / P.days) * 100)}% of days` : '' });
+    if (P.change != null && P.prev != null) chips.push({ label: 'Compared with before', value: `${P.change > 0 ? '+' : ''}${P.change}%`, sub: `${nf(P.prev)} then`, tone: P.change > 0 ? 'up' : P.change < 0 ? 'down' : '' });
+    chips.push({ label: 'New artists', value: nf(P.newArtists), sub: P.newArtistNames && P.newArtistNames[0] ? P.newArtistNames[0] : '' });
+    chips.push({ label: 'Longest run', value: plural(P.longestStreak.len, 'day'), sub: P.longestStreak.start ? fmtRange(P.longestStreak.start, P.longestStreak.end) : '' });
+    if (P.best.day) chips.push({ label: 'Busiest day', value: nf(P.best.count), sub: fmtDay(P.best.day) });
+  }
+  if (!hasHist && ta.length) chips.push({ label: 'Artists', value: nf((sum && sum.topArtistsTotal) || ta.length), sub: '' });
+  return { paragraphs: paras, chips, empty: !paras.length && !chips.length, period, label: PERIOD_LABELS[period] || period };
+}
+
+export function summaryCard(period, a, sum, genres) {
+  const f = summaryFacts(period, a, sum, genres);
+  const title = `Summary <span class="rc-dim">· ${esc(f.label)}</span>`;
+  if (f.empty) return `<section class="rc-card rc-summary" aria-label="Summary"><h3>${title}</h3><p class="rc-empty">${a && a.synced ? 'Nothing to summarise for this time frame yet.' : 'Your summary appears once your listening history has been downloaded.'}</p></section>`;
+  const chips = f.chips.map((c) => `<div class="rc-chip2 ${c.tone || ''}"><span>${esc(c.label)}</span><b>${esc(c.value)}</b>${c.sub ? `<em>${esc(c.sub)}</em>` : ''}</div>`).join('');
+  const body = f.paragraphs.map((p) => `<p>${p.map((x) => (x.b != null ? `<b>${esc(x.b)}</b>` : esc(x.t))).join('')}</p>`).join('');
+  const waiting = !(a && a.synced) ? '<p class="rc-note">The numbers about days, streaks and trends follow when your history has been downloaded.</p>' : '';
+  return `<section class="rc-card rc-summary" aria-label="Summary of ${esc(f.label)}"><h3>${title}</h3>${chips ? `<div class="rc-chips2">${chips}</div>` : ''}<div class="rc-story">${body}</div>${waiting}</section>`;
+}
+
 // ------------------------------------------------------------------------------------ streak
 export function streakCard(a) {
   if (!a || !a.synced) return `<section class="rc-card rc-streak"><div class="rc-flame">${FLAME}</div><div class="rc-big">–<small>day streak</small></div><div class="rc-sub">Your streak appears once your listening history has been downloaded.</div></section>`;

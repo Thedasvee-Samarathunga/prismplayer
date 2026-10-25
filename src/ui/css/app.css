@@ -17,6 +17,8 @@
   --grad: linear-gradient(90deg, #9a9a9a, #d8d8d8); --grad-diag: linear-gradient(135deg, #9a9a9a, #d8d8d8);
   --cover-lyr-filter: blur(15px) brightness(.5) saturate(1.1); --cover-shade-bg: rgba(12, 12, 12, .58); --fs-filter: blur(11px) brightness(.62) saturate(1.1);
   --fs-scrim: rgba(12, 12, 12, .72); --fs-scrim-end: rgba(12, 12, 12, .1);
+  --ly-bg: #0c0c0c; --ly-fg: #ffffff; --ly-dim: #b4b4b4; --ly-accent: #d8d8d8; --ly-on-accent: #0a0a0a; --viz-bg: #000000;
+  --viz-h: 150px; --layer-blur: 70px; --fl1: #555; --fl2: #444; --fl3: #333;
 }
 
 * { box-sizing: border-box; text-align: left; }
@@ -33,12 +35,12 @@ button { cursor: pointer; }
 [hidden] { display: none !important; }
 
 #backdrop { position: fixed; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; }
-#backdrop .layer { position: absolute; inset: -60px; background-size: cover; background-position: center; filter: blur(70px) saturate(1.5) brightness(var(--bd-bright)); opacity: 0; transition: opacity 1.1s ease; }
+#backdrop .layer { position: absolute; inset: -60px; background-size: cover; background-position: center; filter: blur(var(--layer-blur, 70px)) saturate(1.5) brightness(var(--bd-bright)); opacity: 0; transition: opacity 1.1s ease; }
 /* alpha / brightness / wash are set per theme from js/color.js (BACKDROPS): the contrast guarantees are computed from exactly those numbers */
 #backdrop .layer.on { opacity: var(--bd-alpha); }
 #backdrop::after { content: ''; position: absolute; inset: 0; background: var(--bg); opacity: var(--wash); }
 
-#app { position: relative; z-index: 1; height: 100%; display: grid; grid-template-rows: 36px 58px minmax(0, 1fr) 150px 26px; gap: 0; }
+#app { position: relative; z-index: 1; height: 100%; display: grid; grid-template-rows: 36px 58px minmax(0, 1fr) 26px; gap: 0; }
 
 /* ------------------------------------------------------------------ title bar / menu */
 #titlebar { display: flex; align-items: center; gap: 6px; padding: 0 10px; -webkit-app-region: drag; padding-right: calc(100vw - env(titlebar-area-width, 100vw) + 10px); }
@@ -85,12 +87,26 @@ button { cursor: pointer; }
 #vol { display: flex; align-items: center; gap: 4px; }
 
 /* ------------------------------------------------------------------ main panels */
-#main { display: grid; grid-template-columns: var(--left-w, 300px) 6px minmax(0, 1fr) 6px var(--right-w, 330px); padding: 4px 10px 8px; min-height: 0; }
+#main { display: grid; grid-template-columns: var(--left-w, 300px) 6px minmax(0, 1fr) 6px var(--right-w, 330px); grid-template-rows: minmax(0, 1fr) var(--viz-h); row-gap: 8px; padding: 4px 10px 8px; min-height: 0; }
 .splitter { cursor: col-resize; position: relative; }
 .splitter::after { content: ''; position: absolute; top: 20%; bottom: 20%; left: 2px; width: 2px; border-radius: 2px; background: var(--fg); opacity: 0; transition: opacity .15s; }
 .splitter:hover::after, .splitter.drag::after { opacity: .25; }
 /* fixed columns: hiding a panel must not make the others slide into its place */
-#lib { grid-column: 1; } #split-left { grid-column: 2; } #pl { grid-column: 3; } #split-right { grid-column: 4; } #side { grid-column: 5; }
+#lib { grid-column: 1; grid-row: 1; } #split-left { grid-column: 2; grid-row: 1; } #pl { grid-column: 3; grid-row: 1; } #split-right { grid-column: 4; grid-row: 1; } #side { grid-column: 5; grid-row: 1; }
+/* the visualiser row spans every column; with 'side-full' the Now playing panel (and its splitter) take both rows, so it runs the whole height and the row only sits under the library and the queue */
+#viz { grid-column: 1 / -1; grid-row: 2; }
+#main.side-full:not(.hide-side) #side, #main.side-full:not(.hide-side) #split-right { grid-row: 1 / span 2; }
+#main.side-full:not(.hide-side) #viz { grid-column: 1 / 4; }
+#main.no-viz { grid-template-rows: minmax(0, 1fr); row-gap: 0; }
+#main.no-viz #viz { display: none; }
+#main.no-viz.side-full #side, #main.no-viz.side-full #split-right { grid-row: 1; }
+/* the visualiser row at the TOP of the window (Settings > Appearance, or right-click a visualiser) */
+#main.viz-top { grid-template-rows: var(--viz-h) minmax(0, 1fr); }
+#main.viz-top #lib, #main.viz-top #split-left, #main.viz-top #pl, #main.viz-top #split-right, #main.viz-top #side { grid-row: 2; }
+#main.viz-top #viz { grid-row: 1; }
+#main.viz-top.side-full:not(.hide-side) #side, #main.viz-top.side-full:not(.hide-side) #split-right { grid-row: 1 / span 2; }
+#main.viz-top.no-viz { grid-template-rows: minmax(0, 1fr); }
+#main.viz-top.no-viz #lib, #main.viz-top.no-viz #split-left, #main.viz-top.no-viz #pl, #main.viz-top.no-viz #split-right, #main.viz-top.no-viz #side { grid-row: 1; }
 #main.hide-lib { grid-template-columns: 0 0 minmax(0, 1fr) 6px var(--right-w, 330px); }
 #main.hide-lib #lib, #main.hide-lib #split-left { display: none; }
 #main.hide-side { grid-template-columns: var(--left-w, 300px) 6px minmax(0, 1fr) 0 0; }
@@ -183,13 +199,11 @@ select option { background: var(--panel); color: var(--fg); }
 .prop-table tr.sect th { color: var(--dim); font-weight: 700; padding-top: 14px; border-top: 0; text-transform: none; }
 
 /* ------------------------------------------------------------------ visualisers */
-#viz { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; padding: 0 10px 8px; min-height: 0; }
-.vz { position: relative; cursor: context-menu; }
+#viz { display: grid; gap: 0; position: relative; min-height: 0; min-width: 0; }          /* columns (panel weights + 8px splitters) are set by js/viz.js */
+/* the visualiser tiles are always dark "screens" (--viz-bg), in every look, so the graphs never invert on a light theme */
+.vz { position: relative; cursor: context-menu; align-self: end; height: calc(var(--vh, 1) * 100%); min-height: 0; min-width: 0; background: var(--viz-bg); -webkit-backdrop-filter: none; backdrop-filter: none; }
 .vz:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }
 .vz canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
-#main.no-viz ~ #viz { display: none; }
-#app.no-viz { grid-template-rows: 36px 58px minmax(0, 1fr) 0 26px; }
-#app.no-viz #viz { display: none; }
 
 /* ------------------------------------------------------------------ status bar */
 #status { display: flex; align-items: center; gap: 22px; padding: 0 16px; color: var(--dim); font-size: 11.5px; white-space: nowrap; overflow: hidden; }
@@ -283,6 +297,7 @@ input.vslider { writing-mode: vertical-lr; direction: rtl; appearance: slider-ve
 #cover-lyrics { position: absolute; inset: 0; opacity: 0; pointer-events: none; transition: opacity .35s ease; -webkit-mask-image: linear-gradient(transparent 0, #000 16%, #000 84%, transparent 100%); mask-image: linear-gradient(transparent 0, #000 16%, #000 84%, transparent 100%); }
 #cover-wrap #cover { transition: opacity .5s ease, filter .45s ease, transform .45s ease; }
 #cover-wrap.lyr-on #cover { filter: var(--cover-lyr-filter); transform: scale(1.2); }
+#cover-wrap.lyr-on { background: var(--ly-bg); }          /* dark underneath even when there is no cover image (the shade is modelled over black or a darkened cover) */
 #cover-wrap.lyr-on #cover-shade { opacity: 1; }
 #cover-wrap.lyr-on #cover-lyrics { opacity: 1; pointer-events: auto; }
 #cover-wrap.lyr-on #cover-ph::after { opacity: .2; }
@@ -293,22 +308,22 @@ input.vslider { writing-mode: vertical-lr; direction: rtl; appearance: slider-ve
 .ly::-webkit-scrollbar { display: none; }
 .ly-in { position: relative; padding: 0 18px; }
 .ly-spacer { height: 40%; }
-.ly-line { font-size: var(--ly-size, 15px); font-weight: 700; line-height: 1.32; padding: 5px 0; color: var(--dim); transition: color .25s ease, transform .25s ease; transform-origin: left center; overflow-wrap: anywhere; }
+.ly-line { font-size: var(--ly-size, 15px); font-weight: 700; line-height: 1.32; padding: 5px 0; color: var(--ly-dim); transition: color .25s ease, transform .25s ease; transform-origin: left center; overflow-wrap: anywhere; }
 .ly-line.timed { cursor: pointer; }
-.ly-line.timed:hover { color: var(--fg); }
-.ly-line.cur { color: var(--fg); transform: scale(1.06); }
-.ly-line.plain { color: var(--fg); font-weight: 600; }
+.ly-line.timed:hover { color: var(--ly-fg); }
+.ly-line.cur { color: var(--ly-fg); font-weight: 800; transform: scale(1.06); }
+.ly-line.plain { color: var(--ly-fg); font-weight: 600; }
 .ly-line.gap { height: 0.9em; padding: 0; }
-.ly-msg { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; padding: 30% 22px 0; line-height: 1.5; color: var(--dim); }
-.ly-msg b { color: var(--fg); font-size: calc(var(--ly-size, 15px) * 1.15); }
+.ly-msg { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; padding: 30% 22px 0; line-height: 1.5; color: var(--ly-dim); }
+.ly-msg b { color: var(--ly-fg); font-size: calc(var(--ly-size, 15px) * 1.15); }
 .ly-msg span { font-size: calc(var(--ly-size, 15px) * .8); font-weight: 600; }
-.ly-src, .ly-note { padding: 14px 0 0; color: var(--dim); font-size: 11.5px; font-weight: 600; }
+.ly-src, .ly-note { padding: 14px 0 0; color: var(--ly-dim); font-size: 11.5px; font-weight: 600; }
 
 /* ------------------------------------------------------------------ fullscreen lyrics */
-#fs { position: fixed; inset: 0; z-index: 40; display: flex; flex-direction: column; background: #000; color: var(--fg); animation: fade .2s; }
+#fs { position: fixed; inset: 0; z-index: 40; display: flex; flex-direction: column; background: #000; color: var(--ly-fg); animation: fade .2s; }
 #fs[hidden] { display: none; }
 #fs .fs-bg { position: absolute; inset: -40px; background-size: cover; background-position: center; filter: var(--fs-filter); transition: opacity .6s ease; }
-#fs.no-art .fs-bg { background: linear-gradient(155deg, var(--bg), var(--bg2)); filter: none; }
+#fs.no-art .fs-bg { background: var(--ly-bg); filter: none; }
 /* Left 70% (all text lives here): dark enough that every theme colour keeps >= 4.5:1 even over a white cover. The right edge lets the art show through. */
 #fs .fs-scrim { position: absolute; inset: 0; background: linear-gradient(90deg, var(--fs-scrim) 0, var(--fs-scrim) 70%, var(--fs-scrim-end) 100%); }
 .fs-top { position: relative; display: flex; align-items: center; gap: 16px; padding: 26px 5vw 0; }
@@ -316,14 +331,14 @@ input.vslider { writing-mode: vertical-lr; direction: rtl; appearance: slider-ve
 #fs.no-art #fs-cover { display: none; }
 .fs-meta { flex: 0 1 62vw; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 #fs-title { font-size: clamp(18px, 2vw, 26px); font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-#fs-artist { color: var(--accent); font-weight: 700; font-size: clamp(13px, 1.3vw, 17px); }
-#fs-album { color: var(--dim); font-weight: 600; font-size: 12.5px; }
-#fs-close { align-self: flex-start; margin-left: auto; background: color-mix(in srgb, var(--panel) 80%, transparent); transition: opacity .5s ease; }
+#fs-artist { color: var(--ly-accent); font-weight: 700; font-size: clamp(13px, 1.3vw, 17px); }
+#fs-album { color: var(--ly-dim); font-weight: 600; font-size: 12.5px; }
+#fs-close { align-self: flex-start; margin-left: auto; background: color-mix(in srgb, var(--ly-bg) 80%, transparent); transition: opacity .5s ease; }
 #fs-lyrics { position: relative; flex: 1; min-height: 0; margin: 0 5vw; --ly-size: clamp(22px, 3.3vw, 46px); -webkit-mask-image: linear-gradient(transparent 0, #000 12%, #000 86%, transparent 100%); mask-image: linear-gradient(transparent 0, #000 12%, #000 86%, transparent 100%); }
 #fs-lyrics .ly-in { max-width: min(62vw, 1000px); padding-left: 0; }
 .fs-bottom { position: relative; display: flex; align-items: center; gap: 18px; padding: 8px 5vw 26px; transition: opacity .6s ease; }
 #fs-seek { flex: 1; }
-#fs-time { color: var(--dim); font-variant-numeric: tabular-nums; min-width: 92px; }
+#fs-time { color: var(--ly-dim); font-variant-numeric: tabular-nums; min-width: 92px; }
 #fs.idle { cursor: none; }
 #fs.idle .fs-bottom, #fs.idle #fs-close { opacity: 0; pointer-events: none; }
 
@@ -362,7 +377,7 @@ input.vslider { writing-mode: vertical-lr; direction: rtl; appearance: slider-ve
 #rc-s-trends, #rc-s-cal, #rc-s-charts { grid-column: span 12; }
 #rc-s-heat, #rc-s-hl, #rc-s-genres, #rc-s-aom, #rc-s-recent { grid-column: span 6; }
 #rc-s-artists, #rc-s-albums, #rc-s-tracks { grid-column: span 4; }
-@media (max-width: 1000px) { .rc-slot, #rc-s-streak, #rc-s-stats, #rc-s-heat, #rc-s-hl, #rc-s-genres, #rc-s-aom, #rc-s-recent, #rc-s-artists, #rc-s-albums, #rc-s-tracks { grid-column: span 12; } }
+@media (max-width: 1000px) { .rc-slot, #rc-s-summary, #rc-s-streak, #rc-s-stats, #rc-s-heat, #rc-s-hl, #rc-s-genres, #rc-s-aom, #rc-s-recent, #rc-s-artists, #rc-s-albums, #rc-s-tracks { grid-column: span 12; } }
 .rc-slot:empty { display: none; }
 
 .rc-card { background: var(--panel2); border: 1px solid var(--border); border-radius: 14px; padding: 16px 18px; min-width: 0; }
@@ -455,15 +470,30 @@ input.vslider { writing-mode: vertical-lr; direction: rtl; appearance: slider-ve
 .rc-hl dd em { display: block; font-style: normal; color: var(--dim); font-size: 11.5px; font-weight: 600; margin-top: 2px; }
 
 
-/* ------------------------------------------------------------------ looks: frosted pastel glass, vivid colours */
-html[data-look="frost"] { color-scheme: light; }
-html[data-look="frost"] .panel { -webkit-backdrop-filter: blur(var(--blur)) saturate(1.35); backdrop-filter: blur(var(--blur)) saturate(1.35); border-color: color-mix(in srgb, #fff 60%, var(--border)); box-shadow: 0 8px 28px rgba(40, 40, 80, .10), inset 0 1px 0 rgba(255, 255, 255, .55); }
-html[data-look="frost"] .menu, html[data-look="frost"] .modal, html[data-look="frost"] .rc-shell { -webkit-backdrop-filter: blur(26px) saturate(1.3); backdrop-filter: blur(26px) saturate(1.3); border-color: color-mix(in srgb, #fff 60%, var(--border)); box-shadow: 0 24px 70px rgba(40, 40, 80, .28); }
-html[data-look="frost"] .modal-wrap, html[data-look="frost"] #recap { background: rgba(255, 255, 255, .34); }
-html[data-look="frost"] .toast { box-shadow: 0 10px 30px rgba(40, 40, 80, .22); }
-html[data-look="frost"] .rc-cover b { background: rgba(20, 20, 30, .7); color: #fff; }
-html[data-look="frost"] #app { --row-h: 30px; }
-html[data-look="frost"] .panel, html[data-look="frost"] .rc-card { transition: background-color .6s ease, border-color .6s ease; }
+/* ------------------------------------------------------------------ looks: pastel, frosted glass, frosted pastel, liquid; vivid colours */
+html[data-look="pastel"], html[data-look="frost"] { color-scheme: light; }
+html[data-look="glass"], html[data-look="liquid"] { color-scheme: dark; }
+/* every translucent look blurs what is behind the panels */
+html[data-look="frost"] .panel, html[data-look="glass"] .panel { -webkit-backdrop-filter: blur(var(--blur)) saturate(1.35); backdrop-filter: blur(var(--blur)) saturate(1.35); }
+/* liquid: the fluid is already smooth and is blurred ONCE (the canvas below), so the panels do not re-blur it every frame */
+html[data-look="liquid"] .panel { -webkit-backdrop-filter: none; backdrop-filter: none; }
+html[data-look="frost"] .panel, html[data-look="pastel"] .panel { border-color: color-mix(in srgb, #fff 60%, var(--border)); box-shadow: 0 8px 28px rgba(40, 40, 80, .10), inset 0 1px 0 rgba(255, 255, 255, .55); }
+html[data-look="glass"] .panel, html[data-look="liquid"] .panel { border-color: color-mix(in srgb, #fff 16%, var(--border)); box-shadow: 0 8px 30px rgba(0, 0, 0, .28), inset 0 1px 0 rgba(255, 255, 255, .10); }
+html[data-look="frost"] .menu, html[data-look="frost"] .modal, html[data-look="frost"] .rc-shell,
+html[data-look="glass"] .menu, html[data-look="glass"] .modal, html[data-look="glass"] .rc-shell,
+html[data-look="liquid"] .menu, html[data-look="liquid"] .modal, html[data-look="liquid"] .rc-shell { -webkit-backdrop-filter: blur(26px) saturate(1.3); backdrop-filter: blur(26px) saturate(1.3); }
+html[data-look="frost"] .menu, html[data-look="frost"] .modal, html[data-look="frost"] .rc-shell, html[data-look="pastel"] .menu, html[data-look="pastel"] .modal { border-color: color-mix(in srgb, #fff 60%, var(--border)); box-shadow: 0 24px 70px rgba(40, 40, 80, .28); }
+html[data-look="glass"] .menu, html[data-look="glass"] .modal, html[data-look="glass"] .rc-shell, html[data-look="liquid"] .menu, html[data-look="liquid"] .modal, html[data-look="liquid"] .rc-shell { border-color: color-mix(in srgb, #fff 16%, var(--border)); box-shadow: 0 24px 70px rgba(0, 0, 0, .5); }
+html[data-look="frost"] .modal-wrap, html[data-look="frost"] #recap, html[data-look="pastel"] .modal-wrap, html[data-look="pastel"] #recap { background: rgba(255, 255, 255, .34); }
+html[data-look="glass"] .modal-wrap, html[data-look="glass"] #recap, html[data-look="liquid"] .modal-wrap, html[data-look="liquid"] #recap { background: rgba(0, 0, 0, .42); }
+html[data-look="frost"] .toast, html[data-look="pastel"] .toast { box-shadow: 0 10px 30px rgba(40, 40, 80, .22); }
+html[data-look="frost"] .rc-cover b, html[data-look="pastel"] .rc-cover b { background: rgba(20, 20, 30, .7); color: #fff; }
+html[data-look="frost"] #app, html[data-look="pastel"] #app, html[data-look="glass"] #app, html[data-look="liquid"] #app { --row-h: 30px; }
+html[data-look="frost"] .panel, html[data-look="frost"] .rc-card, html[data-look="glass"] .panel, html[data-look="liquid"] .panel { transition: background-color .6s ease, border-color .6s ease; }
+/* liquid: the fluid canvas replaces the blurred cover as the layer behind the panels */
+#liquid { position: absolute; inset: -12px; width: calc(100% + 24px); height: calc(100% + 24px); display: none; opacity: var(--bd-alpha); transition: opacity .8s ease; filter: blur(5px); }
+html[data-look="liquid"] #liquid { display: block; }
+html[data-look="liquid"] #backdrop .layer { display: none; }
 html[data-colors="vivid"][data-look="flat"] .panel { box-shadow: 0 10px 34px rgba(0, 0, 0, .35), 0 0 0 1px color-mix(in srgb, var(--accent) 24%, transparent), 0 0 28px color-mix(in srgb, var(--accent2) 10%, transparent); }
 html[data-colors="vivid"] .icon-btn.primary { box-shadow: 0 0 22px color-mix(in srgb, var(--accent) 60%, transparent); }
 html[data-colors="vivid"] .tab.active { box-shadow: inset 0 -3px 0 var(--shade2); }
@@ -500,3 +530,105 @@ html[data-colors="vivid"] .splitter::after { background: var(--grad); opacity: .
 .hk-key.none { color: var(--dim); font-weight: 600; }
 .hk-key.listen { border-color: var(--accent); color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
 .hk-row .btn { padding: 5px 11px; font-size: 11.5px; }
+
+/* fullscreen lyrics controls use the lyrics palette (light on dark) in every look */
+#fs .icon-btn { color: var(--ly-fg); }
+#fs .icon-btn:hover { background: color-mix(in srgb, var(--ly-fg) 16%, transparent); }
+#fs .icon-btn.primary { background: var(--ly-accent); color: var(--ly-on-accent); }
+#fs .seek-track { background: color-mix(in srgb, var(--ly-fg) 22%, transparent); }
+#fs .seek-fill { background: var(--ly-accent); }
+#fs .seek-thumb { background: var(--ly-fg); }
+#cover-lyrics .btn, #fs .btn { background: color-mix(in srgb, var(--ly-bg) 70%, transparent); color: var(--ly-fg); border-color: color-mix(in srgb, var(--ly-fg) 30%, transparent); }
+
+/* ------------------------------------------------------------------ window controls (desktop app): drawn by Prism, in the theme's colours */
+#wincontrols { margin-left: auto; display: flex; align-self: stretch; -webkit-app-region: no-drag; }
+#wincontrols[hidden] { display: none; }
+#wincontrols button { width: 46px; border: 0; padding: 0; background: transparent; color: var(--fg); display: flex; align-items: center; justify-content: center; transition: background-color .12s, color .12s; }
+#wincontrols button svg { width: 12px; height: 12px; display: block; }
+#wincontrols button:hover { background: color-mix(in srgb, var(--fg) 15%, transparent); }
+#wincontrols button:active { background: color-mix(in srgb, var(--fg) 24%, transparent); }
+#wincontrols #wc-close:hover { background: var(--accent); color: var(--on-accent); }
+html[data-host="electron"] #titlebar { padding-right: 0; }
+
+/* ------------------------------------------------------------------ square corners (Settings > Appearance): nothing is rounded */
+html[data-square="1"] *, html[data-square="1"] *::before, html[data-square="1"] *::after { border-radius: 0 !important; }
+html[data-square="1"] { --radius: 0px; }
+
+/* ------------------------------------------------------------------ recap: summary of the chosen time frame */
+#rc-s-summary { grid-column: span 12; }
+.rc-summary h3 { font-size: 15px; }
+.rc-chips2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(128px, 1fr)); gap: 10px; margin-bottom: 14px; }
+.rc-chip2 { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border-radius: 12px; background: var(--panel); border: 1px solid var(--border); min-width: 0; }
+.rc-chip2 span { color: var(--dim); font-size: 11px; font-weight: 700; }
+.rc-chip2 b { font-size: 20px; font-weight: 800; line-height: 1.2; color: var(--fg); }
+.rc-chip2.up b { color: var(--accent); }
+.rc-chip2 em { font-style: normal; color: var(--dim); font-size: 11px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rc-story p { margin: 0 0 9px; line-height: 1.65; font-size: 13px; color: var(--fg); }
+.rc-story p:last-child { margin-bottom: 0; }
+.rc-story b { color: var(--accent); font-weight: 800; }
+
+.prop-table th .src { display: block; font-style: normal; font-weight: 600; font-size: 10px; color: var(--dim); letter-spacing: .02em; }
+
+/* ------------------------------------------------------------------ background blur (Settings > Appearance): the flat / pastel looks become see-through glass */
+#field { position: absolute; inset: -8%; display: none; opacity: var(--bd-alpha); filter: blur(28px); transition: opacity .8s ease;
+  background: radial-gradient(58% 55% at 16% 22%, var(--fl1) 0, transparent 72%), radial-gradient(52% 60% at 84% 28%, var(--fl2) 0, transparent 72%), radial-gradient(70% 55% at 48% 96%, var(--fl3) 0, transparent 72%); }
+html[data-blur="colours"]:not([data-look="liquid"]) #field { display: block; }
+html[data-blur="colours"]:not([data-look="liquid"]) #backdrop .layer { display: none; }
+html[data-blur="cover"]:not([data-look="liquid"]) .panel, html[data-blur="colours"]:not([data-look="liquid"]) .panel { -webkit-backdrop-filter: blur(var(--blur)) saturate(1.25); backdrop-filter: blur(var(--blur)) saturate(1.25); }
+html[data-blur="cover"][data-look="flat"] .panel, html[data-blur="colours"][data-look="flat"] .panel { border-color: color-mix(in srgb, #fff 14%, var(--border)); box-shadow: 0 8px 26px rgba(0, 0, 0, .26), inset 0 1px 0 rgba(255, 255, 255, .08); }
+html[data-blur="cover"][data-look="pastel"] .panel, html[data-blur="colours"][data-look="pastel"] .panel { border-color: color-mix(in srgb, #fff 60%, var(--border)); box-shadow: 0 8px 28px rgba(40, 40, 80, .10), inset 0 1px 0 rgba(255, 255, 255, .55); }
+html[data-blur="cover"]:not([data-look="liquid"]) .menu, html[data-blur="colours"]:not([data-look="liquid"]) .menu, html[data-blur="cover"]:not([data-look="liquid"]) .modal, html[data-blur="colours"]:not([data-look="liquid"]) .modal { -webkit-backdrop-filter: blur(22px) saturate(1.25); backdrop-filter: blur(22px) saturate(1.25); }
+html[data-blur="cover"] .vz, html[data-blur="colours"] .vz { -webkit-backdrop-filter: none; backdrop-filter: none; }
+
+/* ------------------------------------------------------------------ visualiser row: splitters between panels, height grips */
+#viz.top .vz { align-self: start; }
+.vz-split { position: relative; cursor: col-resize; min-width: 0; }
+.vz-split::after { content: ''; position: absolute; top: 18%; bottom: 18%; left: 3px; width: 2px; border-radius: 2px; background: var(--fg); opacity: 0; transition: opacity .15s; }
+.vz-split:hover::after, .vz-split.drag::after { opacity: .35; }
+.vz-grip { position: absolute; left: 50%; width: 56px; margin-left: -28px; top: -1px; height: 12px; cursor: ns-resize; z-index: 3; opacity: 0; transition: opacity .15s; touch-action: none; }
+#viz.top .vz-grip { top: auto; bottom: -1px; }
+.vz-grip::after { content: ''; position: absolute; left: 14px; right: 14px; top: 4px; height: 3px; border-radius: 2px; background: #fff; opacity: .6; }
+.vz:hover .vz-grip, .vz-grip.drag { opacity: 1; }
+.vz-rowgrip { position: absolute; left: 0; right: 0; top: -8px; height: 8px; cursor: row-resize; z-index: 4; touch-action: none; }
+#viz.top .vz-rowgrip { top: auto; bottom: -8px; }
+.vz-rowgrip:hover, .vz-rowgrip.drag { background: linear-gradient(180deg, transparent 3px, color-mix(in srgb, var(--fg) 35%, transparent) 3px, color-mix(in srgb, var(--fg) 35%, transparent) 5px, transparent 5px); }
+body.vz-dragging, body.vz-dragging * { user-select: none !important; }
+html[data-square="1"] .vz-grip::after { border-radius: 0 !important; }
+
+/* ------------------------------------------------------------------ music DJ (ribbon button + panel) */
+.dj-btn { display: inline-flex; align-items: center; gap: 7px; }
+.dj-ic svg { display: block; color: var(--accent); }
+.dj-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 60%, transparent); animation: djpulse 1.8s ease-out infinite; }
+@keyframes djpulse { 70% { box-shadow: 0 0 0 7px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
+.dj-btn.dj-live .dj-ic svg { animation: djspin 6s linear infinite; }
+@keyframes djspin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .dj-dot, .dj-btn.dj-live .dj-ic svg { animation: none; } }
+#djpanel { position: fixed; z-index: 55; width: 392px; max-height: calc(100vh - 60px); overflow-y: auto; padding: 14px 16px 16px; background: var(--menu-bg); color: var(--fg); border: 1px solid var(--border); border-radius: 14px; box-shadow: 0 24px 60px rgba(0, 0, 0, .5); scrollbar-width: thin; }
+#djpanel[hidden] { display: none; }
+html:not([data-look="flat"]):not([data-look="pastel"]) #djpanel, html[data-blur="cover"] #djpanel, html[data-blur="colours"] #djpanel { -webkit-backdrop-filter: blur(24px) saturate(1.3); backdrop-filter: blur(24px) saturate(1.3); }
+.dj-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.dj-head b { font-size: 15px; font-weight: 800; flex: 1; }
+.dj-state { display: inline-flex; align-items: center; gap: 6px; color: var(--dim); font-size: 11.5px; font-weight: 700; }
+.dj-state i { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+.dj-main { width: 100%; padding: 10px 16px; font-size: 13px; }
+.dj-sec { margin-top: 14px; display: flex; flex-direction: column; gap: 8px; }
+.dj-sec .lab { color: var(--dim); font-weight: 700; font-size: 11.5px; }
+.dj-sec .lab b { color: var(--fg); }
+.dj-seg { display: flex; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: var(--panel2); }
+.dj-seg button { flex: 1; padding: 7px 6px; border: 0; background: transparent; font-weight: 700; font-size: 12px; color: var(--dim); }
+.dj-seg button + button { border-left: 1px solid var(--border); }
+.dj-seg button.on { background: var(--accent); color: var(--on-accent); }
+.dj-seg button:not(.on):hover { color: var(--fg); background: color-mix(in srgb, var(--fg) 8%, transparent); }
+#dj-filter { background: var(--panel2); border: 1px solid var(--border); border-radius: 9px; padding: 7px 10px; outline: none; user-select: text; }
+#dj-filter:focus { border-color: var(--accent); }
+.dj-chips { display: flex; flex-wrap: wrap; gap: 6px; max-height: 128px; overflow-y: auto; scrollbar-width: thin; padding: 2px; }
+.dj-chip { padding: 5px 10px; border-radius: 99px; border: 1px solid var(--border); background: var(--panel2); font-size: 11.5px; font-weight: 700; color: var(--fg); }
+.dj-chip em { font-style: normal; color: var(--dim); font-weight: 600; margin-left: 3px; }
+.dj-chip.on { background: var(--accent); color: var(--on-accent); border-color: transparent; }
+.dj-chip.on em { color: var(--on-accent); opacity: .8; }
+.dj-pool, .dj-hint, .dj-none { color: var(--dim); font-size: 11.5px; font-weight: 600; line-height: 1.5; }
+#dj-fade { width: 100%; accent-color: var(--accent); }
+.dj-next { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; counter-reset: n; }
+.dj-next li { display: flex; flex-direction: column; padding: 5px 8px; border-radius: 8px; background: var(--panel2); counter-increment: n; }
+.dj-next .t { font-weight: 700; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dj-next .a { color: var(--dim); font-size: 11px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

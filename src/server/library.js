@@ -7,6 +7,7 @@
 const fs = require('fs');
 const path = require('path');
 const ff = require('./ffmpeg');
+const cue = require('./cue');
 const { JsonStore } = require('./store');
 
 const SKIP_DIRS = new Set(['$recycle.bin', 'system volume information', 'node_modules', '.git']);
@@ -45,7 +46,8 @@ class Library {
     this.statsStore.load();
   }
 
-  list() { return Array.from(this.tracks.values()); }
+  // the whole-file entry of an audio file that a cue sheet splits into tracks is kept (it holds the probe result) but never listed
+  list() { return Array.from(this.tracks.values()).filter((t) => !t.hidden); }
   get(id) { return this.tracks.get(id) || null; }
 
   _persist() {
@@ -84,7 +86,7 @@ class Library {
       if (e.isDirectory()) {
         if (SKIP_DIRS.has(e.name.toLowerCase()) || e.name.startsWith('.')) continue;
         yield* this._walk(full, depth + 1);
-      } else if (e.isFile() && ff.isAudioFile(e.name)) {
+      } else if (e.isFile() && (ff.isAudioFile(e.name) || ff.isCueFile(e.name))) {
         yield full;
       }
     }
@@ -107,6 +109,7 @@ class Library {
     const seen = new Set();
     const todo = [];
     const roots = [];
+    const cues = [];            // {file, root}
     try {
       for (const f of folders) {
         const online = f.enabled ? await this._online(f.path) : true;
@@ -115,6 +118,7 @@ class Library {
         for await (const file of this._walk(f.path)) {
           const id = ff.trackId(file);
           if (seen.has(id)) continue;                      // folder inside another chosen folder
+          if (ff.isCueFile(file)) { seen.add(id); cues.push({ file, root: f.path }); continue; }
           seen.add(id);
           st.found++;
           let stat;
@@ -145,6 +149,27 @@ class Library {
       };
       await Promise.all(Array.from({ length: 4 }, worker));
 
+      // ---- cue sheets: their tracks replace the whole-file entry of the audio they describe
+      const claimed = new Set();
+      for (const c of cues) {
+        try {
+          const r = await this._cueTracks(c.file, c.root, false);
+          for (const t of r.tracks) seen.add(t.id);
+          for (const id of r.parents) claimed.add(id);
+          if (r.problem) st.errors++;
+        } catch (_) { st.errors++; }
+      }
+      // a cue sheet stored inside the file itself (a CUESHEET tag) works the same way
+      for (const t of Array.from(this.tracks.values())) {
+        if (t.cue || !seen.has(t.id) || claimed.has(t.id) || !t.cueText || !cue.looksLikeCue(t.cueText)) continue;
+        try {
+          const r = await this._cueFromSheet(cue.parseCue(t.cueText), { cuePath: '', root: t.root, extra: false, cueMtime: t.mtime, embeddedIn: t.path });
+          for (const x of r.tracks) seen.add(x.id);
+          for (const id of r.parents) claimed.add(id);
+        } catch (_) { st.errors++; }
+      }
+      for (const t of this.tracks.values()) { if (t.cue) continue; if (seen.has(t.id)) t.hidden = claimed.has(t.id) || undefined; }
+
       // ---- purge. Only tracks of folders that were actually reachable may disappear.
       const byPath = new Map(roots.map((r) => [r.path, r]));
       for (const [id, t] of Array.from(this.tracks)) {
@@ -155,7 +180,7 @@ class Library {
         this.tracks.delete(id);                                          // folder removed/disabled, or file deleted
       }
       for (const t of this.tracks.values()) if (seen.has(t.id)) t.offline = false;
-      for (const t of this.tracks.values()) { const r = t.root && byPath.get(t.root); if (r) r.tracks++; }
+      for (const t of this.tracks.values()) { if (t.hidden) continue; const r = t.root && byPath.get(t.root); if (r) r.tracks++; }
       st.roots = roots;
       this._persist();
     } finally {
@@ -163,6 +188,74 @@ class Library {
       st.finishedAt = Date.now();
     }
     return st;
+  }
+
+  // ---- cue sheets ------------------------------------------------------------------------
+  // Which audio file does a FILE line of a cue sheet mean? The name as written, then the same name in any letter case, then the same name with
+  // another audio extension (cue sheets say "album.wav" for an album that was later converted to album.flac), then a file called like the cue sheet.
+  async _resolveCueAudio(cuePath, name, onlyFile) {
+    const dir = path.dirname(cuePath);
+    let names;
+    try { names = await fs.promises.readdir(dir); } catch (_) { return null; }
+    const audio = names.filter((n) => ff.isAudioFile(n));
+    const base = path.basename(String(name || '').replace(/\\/g, '/'));
+    const lc = (x) => x.toLowerCase(), stem = (x) => lc(path.parse(x).name);
+    let hit = audio.find((n) => n === base) || audio.find((n) => lc(n) === lc(base));
+    if (!hit && base) { const stems = audio.filter((n) => stem(n) === stem(base)); if (stems.length === 1) hit = stems[0]; }
+    if (!hit && onlyFile) { const own = audio.filter((n) => stem(n) === stem(cuePath)); if (own.length === 1) hit = own[0]; }
+    return hit ? path.join(dir, hit) : null;
+  }
+
+  /** Reads one cue sheet and (re)creates its tracks. Returns { tracks, parents: [ids of the audio files it splits], problem }. */
+  async _cueTracks(cuePath, root, extra) {
+    const out = { tracks: [], parents: [], problem: '' };
+    const st = await fs.promises.stat(cuePath);
+    if (st.size > 2 * 1024 * 1024) { out.problem = 'too big'; return out; }
+    const sheet = cue.parseCue(require('./lyrics').decodeText(await fs.promises.readFile(cuePath)));
+    return this._cueFromSheet(sheet, { cuePath, root, extra, cueMtime: Math.floor(st.mtimeMs) });
+  }
+
+  async _cueFromSheet(sheet, { cuePath, root, extra, cueMtime, embeddedIn }) {
+    const out = { tracks: [], parents: [], problem: '' };
+    // the audio files this sheet talks about (probed if they are not known yet)
+    const parents = new Map();       // audio path -> parent track
+    for (let i = 0; i < sheet.files.length; i++) {
+      const p = embeddedIn ? embeddedIn : await this._resolveCueAudio(cuePath, sheet.files[i].name, sheet.files.length === 1);
+      if (!p || parents.has(p)) continue;
+      let parent = this.tracks.get(ff.trackId(p));
+      if (!parent) { try { parent = await ff.probeTrack(p); parent.added = Date.now(); parent.root = root; if (extra) parent.extra = true; this.tracks.set(parent.id, parent); } catch (_) { continue; } }
+      parents.set(p, parent);
+    }
+    const expanded = cue.expandCue(sheet, (name, fi) => {
+      let p = embeddedIn || null;
+      if (!p) { for (const [pp] of parents) { if (path.basename(pp).toLowerCase() === path.basename(String(name || '').replace(/\\/g, '/')).toLowerCase()) { p = pp; break; } } }
+      if (!p && sheet.files.length === 1 && parents.size === 1) p = parents.keys().next().value;
+      if (!p) { const idx = Array.from(parents.keys())[fi]; p = idx || null; }
+      const parent = p && parents.get(p);
+      return parent ? { path: p, duration: parent.duration } : null;
+    });
+    if (expanded.missing.length) out.problem = 'missing audio';
+    for (const x of expanded.tracks) {
+      const parent = parents.get(x.file);
+      const id = ff.trackId(`${x.file}#cue${x.fileIndex}-${x.no}`);
+      const old = this.tracks.get(id);
+      const t = Object.assign({}, parent, {
+        id, parentId: parent.id, path: x.file, cue: true, cuePath: cuePath || '', cueStart: x.start, cueEnd: x.end, cueMtime: cueMtime || 0,
+        title: x.title || `Track ${String(x.no).padStart(2, '0')}`, hasTitle: !!x.title,
+        artist: x.performer || x.albumPerformer || parent.artist, albumArtist: x.albumPerformer || parent.albumArtist || '',
+        album: x.album || parent.album, track: x.no, trackTotal: x.count, disc: x.discNumber || parent.disc || 0, discTotal: parent.discTotal || 0,
+        year: (/\d{4}/.exec(x.date || '') ? parseInt(/\d{4}/.exec(x.date)[0], 10) : parent.year) || 0,
+        genre: x.genre || parent.genre || '', composer: x.songwriter || parent.composer || '', comment: '',
+        duration: x.end != null ? Math.max(0, x.end - x.start) : Math.max(0, (parent.duration || 0) - x.start),
+        native: false, hidden: undefined, extra: extra ? true : undefined, root: root || parent.root,
+        rgTrack: x.rgTrackGain != null ? x.rgTrackGain : null, rgTrackPeak: null, rgAlbum: x.rgAlbumGain != null ? x.rgAlbumGain : (parent.rgAlbum != null ? parent.rgAlbum : null), rgAlbumPeak: parent.rgAlbumPeak || null,
+        rgScanned: false, cueText: undefined, added: (old && old.added) || Date.now(), offline: false,
+      });
+      // bit rate of the part, not of the whole file (it is the same stream: keep the file's value)
+      this.tracks.set(id, t); out.tracks.push(t);
+    }
+    for (const parent of parents.values()) { if (expanded.tracks.some((x) => ff.trackId(x.file) === parent.id)) { parent.hidden = true; out.parents.push(parent.id); } }
+    return out;
   }
 
   // ---- watching --------------------------------------------------------------------------
@@ -181,7 +274,7 @@ class Library {
         const w = fs.watch(f.path, { recursive: true, persistent: false }, (_ev, name) => {
           if (!name) return trigger();
           const n = String(name);
-          if (ff.isAudioFile(n) || !path.extname(n)) trigger();        // audio files, or folders being added/removed/renamed
+          if (ff.isAudioFile(n) || ff.isCueFile(n) || !path.extname(n)) trigger();        // audio files, or folders being added/removed/renamed
         });
         w.on('error', () => {});
         this._watchers.push(w);
@@ -208,11 +301,12 @@ class Library {
 
   // ---- files added by hand (drag & drop, "Add files") -----------------------------------
   async addPaths(paths) {
-    const files = [];
+    const files = [], cueFiles = [];
     for (const p of paths) {
       let stat;
       try { stat = await fs.promises.stat(p); } catch (_) { continue; }
-      if (stat.isDirectory()) { for await (const f of this._walk(p)) files.push(f); }
+      if (stat.isDirectory()) { for await (const f of this._walk(p)) (ff.isCueFile(f) ? cueFiles : files).push(f); }
+      else if (ff.isCueFile(p)) cueFiles.push(p);
       else if (ff.isAudioFile(p)) files.push(p);
     }
     const out = [];
@@ -232,17 +326,23 @@ class Library {
       }
     };
     await Promise.all(Array.from({ length: 4 }, worker));
-    if (out.length) this._persist();
+    // cue sheets: their tracks go in, and the whole-file entries of the audio they split stay out of the result
     const order = new Map(files.map((f, i) => [ff.trackId(f), i]));
-    out.sort((a, b) => order.get(a.id) - order.get(b.id));
-    return out;
+    const claimed = new Set(), entries = [];
+    for (const cf of cueFiles) {
+      try { const r = await this._cueTracks(cf, null, true); r.parents.forEach((id) => claimed.add(id)); r.tracks.forEach((t) => entries.push({ t, rank: files.length + cueFiles.indexOf(cf) })); } catch (_) { /* unreadable cue */ }
+    }
+    for (const t of out) if (!claimed.has(t.id)) entries.push({ t, rank: order.has(t.id) ? order.get(t.id) : 1e9 });
+    if (entries.length || claimed.size) this._persist();
+    entries.sort((a, b) => (a.rank - b.rank) || ((a.t.disc || 0) - (b.t.disc || 0)) || ((a.t.track || 0) - (b.t.track || 0)));
+    return entries.map((e) => e.t);
   }
 
   // ---- ReplayGain scan (measures tracks without ReplayGain tags; never writes to your files) --------------------
   async scanReplayGain({ all = false } = {}) {
     const rs = this.rgStatus;
     if (rs.running) return rs;
-    const todo = this.list().filter((t) => !t.offline && (all || (t.rgTrack == null || t.rgTrackPeak == null)) && fs.existsSync(t.path));
+    const todo = this.list().filter((t) => !t.cue && !t.offline && (all || (t.rgTrack == null || t.rgTrackPeak == null)) && fs.existsSync(t.path));
     Object.assign(rs, { running: true, done: 0, total: todo.length, failed: 0 });
     (async () => {
       let idx = 0;

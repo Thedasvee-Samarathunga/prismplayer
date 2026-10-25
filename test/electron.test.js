@@ -19,6 +19,7 @@ function makeFake(userData, o = {}) {
     getPath: () => userData, setPath: (n, p) => { userData = p; app._userData = p; }, getVersion: () => '9.9.9', isPackaged: true,
     requestSingleInstanceLock: () => (o.lock === false ? false : true),
     quit: () => { calls.quit++; }, exit: (c) => { calls.exits.push(c); }, relaunch: () => { calls.relaunch++; },
+    setAppUserModelId: (id) => { calls.appId = id; },
     whenReady: () => Promise.resolve(), disableHardwareAcceleration: () => { calls.gpuOff++; }, commandLine: { appendSwitch() {} },
   });
   class BrowserWindow extends EventEmitter {
@@ -27,7 +28,7 @@ function makeFake(userData, o = {}) {
       executeJavaScript: async () => (o.page || { ok: true, fonts: true, bg: '#000000', host: true }) }); }
     once(ev, cb) { if (ev === 'ready-to-show') setTimeout(cb, 5); else super.once(ev, cb); return this; }
     show() { this.visible = true; calls.shown++; } isVisible() { return this.visible; } isDestroyed() { return this.destroyed; } destroy() { this.destroyed = true; }
-    isMinimized() { return false; } restore() {} focus() {} getNormalBounds() { return { x: 1, y: 1, width: 1200, height: 800 }; } isMaximized() { return false; } maximize() {} setFullScreen() {} setTitleBarOverlay() {}
+    isMinimized() { return false; } restore() {} focus() {} getNormalBounds() { return { x: 1, y: 1, width: 1200, height: 800 }; } isMaximized() { return !!this._max; } maximize() { this._max = true; this.emit('maximize'); } unmaximize() { this._max = false; this.emit('unmaximize'); } minimize() { this.minimized = true; } close() { this.closed = true; } setFullScreen() {} setTitleBarOverlay() {}
     async loadURL(url) { if (o.failLoad) { this.webContents.emit('did-fail-load', {}, -105, 'ERR_NAME_NOT_RESOLVED', url, true); throw new Error('load failed'); } const r = await fetch(url); assert.equal(r.status, 200); this.webContents.emit('did-finish-load'); }
   }
   const handlers = {}, invokes = {};
@@ -132,6 +133,42 @@ test('global hotkeys IPC: registers what the system allows, reports the rest, ig
   assert.deepEqual(r.ok, ['Ctrl+Alt+Space']); assert.deepEqual(r.failed, ['Ctrl+Alt+Left']);
   assert.equal(f.calls.unregisterAll >= 1, true, 'old registrations are cleared first');
   assert.deepEqual((await f.invokes['global-hotkeys']({}, 'nonsense')), { ok: [], failed: [] });
+});
+
+test('window buttons: the app draws its own (no native overlay), and minimise / maximise-restore / close act on the real window; state changes are reported', async () => {
+  const f = await launch(tmp('wc'));
+  const w = f.calls.windows[0];
+  assert.equal(w.opts.titleBarStyle, 'hidden');
+  assert.equal(w.opts.titleBarOverlay, undefined, 'no native overlay: its flat grey buttons could not take the theme colours');
+  const sent = [];
+  w.webContents.send = (ch, v) => sent.push([ch, v]);
+  assert.deepEqual(await f.invokes['win-state'](), { maximized: false });
+  f.handlers['win-control']({}, 'minimize'); assert.equal(w.minimized, true);
+  f.handlers['win-control']({}, 'maximize'); assert.equal(w.isMaximized(), true);
+  assert.deepEqual(await f.invokes['win-state'](), { maximized: true });
+  f.handlers['win-control']({}, 'maximize'); assert.equal(w.isMaximized(), false, 'a second press restores');
+  assert.deepEqual(sent.filter(([c]) => c === 'win-state').map(([, v]) => v.maximized), [true, false], 'the page is told, so the button icon can change');
+  f.handlers['win-control']({}, 'bogus'); f.handlers['win-control']({}, null); assert.equal(w.closed, undefined, 'unknown actions do nothing');
+  f.handlers['win-control']({}, 'close'); assert.equal(w.closed, true);
+  w.destroyed = true;
+  f.handlers['win-control']({}, 'maximize');                       // a destroyed window never throws
+  assert.deepEqual(await f.invokes['win-state'](), { maximized: false });
+});
+
+test('taskbar identity: the app id matches the installer (so the taskbar groups / pins with the right icon); the window gets the icon file when there is one', async () => {
+  const f = await launch(tmp('appid'));
+  const pkg = require('../package.json');
+  assert.equal(f.calls.appId, 'com.prism.player'); assert.equal(f.calls.appId, pkg.build.appId, 'same id as electron-builder uses');
+  const w = f.calls.windows[0];
+  assert.ok(typeof w.opts.icon === 'string' && /build[\\/]icon\.(ico|png)$/.test(w.opts.icon), 'the dev run shows the icon in the window: ' + w.opts.icon);
+  assert.equal(pkg.build.win.icon, 'build/icon.ico');
+  const fs = require('fs'), path = require('path');
+  const ico = fs.readFileSync(path.join(__dirname, '..', 'build', 'icon.ico'));
+  assert.deepEqual([ico[0], ico[1], ico[2], ico[3]], [0, 0, 1, 0], 'a real .ico file');
+  const n = ico.readUInt16LE(4), sizes = []; for (let i = 0; i < n; i++) sizes.push(ico[6 + i * 16] || 256);
+  for (const need of [16, 24, 32, 48, 64, 256]) assert.ok(sizes.includes(need), 'the .ico has a ' + need + ' px picture (taskbar, alt-tab, explorer): ' + sizes);
+  const png = fs.readFileSync(path.join(__dirname, '..', 'build', 'icon.png'));
+  assert.equal(png.readUInt32BE(16), 512); assert.equal(png.readUInt32BE(20), 512);
 });
 
 test('self-test (--smoke-test): checks server, bundled tools, real decode + stream, window; writes the result and exits 0', async () => {

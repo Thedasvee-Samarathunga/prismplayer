@@ -3,7 +3,7 @@
 import { api } from './api.js';
 import { S, on } from './state.js';
 import { escapeHtml } from './fmt.js';
-import { PERIOD_LABELS, streakCard, statCards, topList, albumGrid, trendsView, calendarHeat, weekHourHeat, highlights, artistOfMonth, chartsView, genresView, recentList, messageCard, setupCard, flameIcon, nf } from './recapviews.js';
+import { PERIOD_LABELS, summaryCard, streakCard, statCards, topList, albumGrid, trendsView, calendarHeat, weekHourHeat, highlights, artistOfMonth, chartsView, genresView, recentList, messageCard, setupCard, flameIcon, nf } from './recapviews.js';
 import { toast } from './dialogs.js';
 
 let root = null, open = false, period = 'overall', loadToken = 0, pollTimer = 0;
@@ -85,6 +85,7 @@ function render() {
   const err = (k) => (view.errors[k] ? `<p class="rc-note">${escapeHtml(view.errors[k])}</p>` : '');
   const stale = sum && sum.stale ? '<p class="rc-note">You are offline: this is the last saved copy of your recap.</p>' : '';
   body.innerHTML = `${stale}<div class="rc-grid12">
+    ${section('rc-s-summary', summaryCard(period, a, sum, view.genres))}
     ${section('rc-s-streak', streakCard(a))}
     ${section('rc-s-stats', statCards(a, sum))}
     ${section('rc-s-artists', sum ? topList('Top artists', sum.topArtists, sum.topArtistsTotal) + err('artists') : loading('Top artists'))}

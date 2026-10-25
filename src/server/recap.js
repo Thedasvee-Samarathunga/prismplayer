@@ -43,9 +43,54 @@ const mondayOf = (k) => addDays(k, -weekdayIdx(keyDate(k)));
 const monthOf = (k) => k.slice(0, 7);
 
 // ---------------------------------------------------------------------------------------------
+// matching a library track to a Last.fm track: names are compared without case, accents, punctuation, "&" vs "and", a leading "The"
+// ---------------------------------------------------------------------------------------------
+const norm = (s) => String(s == null ? '' : s).normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/&/g, ' and ').replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+const normArtist = (s) => norm(s).replace(/^the /, '');
+// "Song (Remastered 2011)", "Song [Mono]", "Song - 2009 Remaster", "Song (feat. X)": parts that only describe the release of the same recording.
+// (A "Live" or "Acoustic" or "Remix" version is a different recording and keeps its own counts.)
+const VERSION_NOTE = /\b(remaster(ed)?|version|mono|stereo|deluxe|bonus|single|explicit|clean|radio edit|feat\.?|featuring|ft\.?)\b/i;
+const looseTitle = (s) => norm(String(s == null ? '' : s)
+  .replace(/\s*[\(\[]([^\)\]]*)[\)\]]/g, (m, inner) => (VERSION_NOTE.test(inner) ? ' ' : m))
+  .replace(/\s+-\s+(.*)$/, (m, rest) => (VERSION_NOTE.test(rest) ? ' ' : m)));
+const trackKey = (artist, title) => `${normArtist(artist)}\u0001${norm(title)}`;
+
+// ---------------------------------------------------------------------------------------------
 // analytics: pure function of the history file
 // ---------------------------------------------------------------------------------------------
-function emptyHistory() { return { v: 1, user: '', days: {}, hours: new Array(168).fill(0), artists: {}, monthArtists: {}, total: 0, newestTs: 0, newestKeys: [], oldestTs: 0, full: false, truncated: false, cursor: null, updatedAt: 0 }; }
+// v2 adds `tracks`: key -> [first scrobble, last scrobble, count] for every track (play count, first / last played of a song)
+function emptyHistory() { return { v: 2, tracksIndexed: true, tracks: {}, user: '', days: {}, hours: new Array(168).fill(0), artists: {}, monthArtists: {}, total: 0, newestTs: 0, newestKeys: [], oldestTs: 0, full: false, truncated: false, cursor: null, updatedAt: 0 }; }
+
+const PERIOD_DAYS = { '7day': 7, '1month': 30, '3month': 90, '6month': 180, '12month': 365 };
+
+// What happened inside one time frame (the same ones the recap offers): counts, streak, busiest day, weekday pattern, new artists, change against the frame before.
+function periodStats(h, today, spanDays) {
+  const days = h.days, out = {};
+  const sumRange = (from, to) => { let n = 0, act = 0; for (let k = from; dayDiff(k, to) >= 0; k = addDays(k, 1)) { const v = days[k] || 0; n += v; if (v > 0) act++; } return { n, act }; };
+  for (const [pid, len0] of Object.entries(Object.assign({}, PERIOD_DAYS, { overall: null }))) {
+    const len = len0 || Math.max(1, spanDays), from = addDays(today, -(len - 1));
+    let n = 0, act = 0, best = { day: null, count: 0 }, run = 0, longest = { len: 0, start: null, end: null }, runStart = null;
+    const weekdays = new Array(7).fill(0);
+    for (let k = from, i = 0; i < len; k = addDays(k, 1), i++) {
+      const v = days[k] || 0;
+      n += v; weekdays[weekdayIdx(keyDate(k))] += v;
+      if (v > 0) { act++; if (v > best.count) best = { day: k, count: v }; if (run === 0) runStart = k; run++; if (run > longest.len) longest = { len: run, start: runStart, end: k }; } else run = 0;
+    }
+    const prev = len0 ? sumRange(addDays(from, -len), addDays(from, -1)) : null;
+    const lo = Math.floor(keyDate(from).getTime() / 1000) - 43200, hi = Math.floor(keyDate(today).getTime() / 1000) + 43200;
+    const fresh = [];
+    for (const name of Object.keys(h.artists)) { const first = h.artists[name][0]; if (first >= lo && first <= hi && (len0 || true)) fresh.push({ name, plays: h.artists[name][1] }); }
+    fresh.sort((a, b) => b.plays - a.plays || (a.name < b.name ? -1 : 1));
+    const argmax = (a) => a.reduce((bi, v, i) => (v > a[bi] ? i : bi), 0);
+    out[pid] = {
+      days: len, from, to: today, scrobbles: n, activeDays: act, avgPerDay: Math.round((n / len) * 10) / 10, avgPerActiveDay: act ? Math.round((n / act) * 10) / 10 : 0,
+      best, longestStreak: longest, weekdays, busiestWeekday: n ? argmax(weekdays) : -1,
+      prev: prev ? prev.n : null, change: prev && prev.n > 0 ? Math.round(((n - prev.n) / prev.n) * 100) : null,
+      newArtists: fresh.length, newArtistNames: fresh.slice(0, 5).map((x) => x.name),
+    };
+  }
+  return out;
+}
 
 function computeAnalytics(h, nowMs) {
   const now = nowMs == null ? Date.now() : nowMs;
@@ -125,12 +170,13 @@ function computeAnalytics(h, nowMs) {
   });
 
   const spanDays = h.oldestTs ? Math.max(1, dayDiff(dayKey(h.oldestTs * 1000), today) + 1) : 0;
+  const periods = periodStats(h, today, spanDays);
   return {
     synced: !!h.full, total: h.total, firstTs: h.oldestTs, newestTs: h.newestTs, updatedAt: h.updatedAt, truncated: !!h.truncated,
     streak, activeDays: active.length, spanDays,
     avgPerDay: spanDays ? Math.round((h.total / spanDays) * 10) / 10 : 0,
     avgPerActiveDay: active.length ? Math.round((h.total / active.length) * 10) / 10 : 0,
-    best, longestGap: gap, months, weeks, years, calendar, heat, weekdays, hours: hoursSum, changes, discovery, artistOfMonth,
+    best, longestGap: gap, months, weeks, years, calendar, heat, weekdays, hours: hoursSum, changes, discovery, artistOfMonth, periods,
     favourite: { weekday: h.total ? argmax(weekdays) : -1, hour: h.total ? argmax(hoursSum) : -1 }, personality,
   };
 }
@@ -152,7 +198,8 @@ class RecapService {
     this.cache.load();
     this.histStore = new JsonStore(path.join(dataDir, 'recap-history.json'), emptyHistory());
     this.hist = this.histStore.load();
-    if (!this.hist || this.hist.v !== 1 || !this.hist.days) { this.hist = emptyHistory(); this.histStore.set(this.hist); }
+    if (!this.hist || (this.hist.v !== 1 && this.hist.v !== 2) || !this.hist.days) { this.hist = emptyHistory(); this.histStore.set(this.hist); }
+    if (!this.hist.tracks) this.hist.tracks = {};           // a history saved by an older Prism: usable as it is, and rebuilt once in the background (see _sync)
     this._next = 0;
     this._syncing = null;
     this.status = { running: false, phase: '', page: 0, totalPages: 0, scrobbles: this.hist.total, error: '', errorKind: '', startedAt: 0, finishedAt: 0, full: this.hist.full };
@@ -175,7 +222,7 @@ class RecapService {
     return new Promise((resolve, reject) => {
       const u = new URL(url);
       const lib = u.protocol === 'http:' ? http : https;
-      const req = lib.get(u, { headers: { 'User-Agent': 'Prism/1.3 (recap)', Accept: 'application/json' }, timeout: this.timeoutMs }, (res) => {
+      const req = lib.get(u, { headers: { 'User-Agent': 'Prism/2.0 (recap)', Accept: 'application/json' }, timeout: this.timeoutMs }, (res) => {
         const chunks = [];
         res.on('data', (d) => chunks.push(d));
         res.on('end', () => {
@@ -335,11 +382,44 @@ class RecapService {
     return { configured: i.configured, user: i.user, synced: a.synced, current: a.streak.current, atRisk: a.streak.atRisk, longest: a.streak.longest, total: a.total, updatedAt: a.updatedAt };
   }
 
+  /** Plays, first and last scrobble of every library track, from the Last.fm history. stats: { trackId: [plays, firstTs, lastTs] } (only tracks with plays). */
+  trackStats(tracks) {
+    const h = this.hist, i = this.info();
+    const ready = !!(i.configured && i.user && h.full && h.tracksIndexed);
+    const out = { ready, user: i.user, updatedAt: h.updatedAt, scrobbles: h.total, syncing: !!this.status.running, reindexing: !!(h.full && !h.tracksIndexed), stats: {} };
+    if (!ready) return out;
+    const sig = `${h.total}|${h.newestTs}|${Object.keys(h.tracks).length}`;
+    if (!this._loose || this._looseSig !== sig) {                  // the same index with the version-describing parts of titles removed
+      const m = new Map();
+      for (const k of Object.keys(h.tracks)) {
+        const [a, t] = k.split('\u0001'), e = h.tracks[k], lk = `${a}\u0001${e[3] != null ? e[3] : t}`, c = m.get(lk);
+        if (c) { c[0] = Math.min(c[0], e[0]); c[1] = Math.max(c[1], e[1]); c[2] += e[2]; } else m.set(lk, e.slice(0, 3));
+      }
+      this._loose = m; this._looseSig = sig;
+    }
+    for (const t of tracks || []) {
+      let e = null;
+      for (const art of [t.artist, t.albumArtist]) {
+        if (!art || !t.title) continue;
+        // the merged count of every release of the recording (plain, "Remastered", "feat."...), else the exact name
+        e = this._loose.get(`${normArtist(art)}\u0001${looseTitle(t.title)}`) || h.tracks[trackKey(art, t.title)] || null;
+        if (e) break;
+      }
+      if (e) out.stats[t.id] = [e[2], e[0], e[1]];
+    }
+    return out;
+  }
+
   _addScrobble(uts, artist, track) {
     const h = this.hist, d = new Date(uts * 1000), k = dayKey(uts * 1000);
     h.days[k] = (h.days[k] || 0) + 1;
     h.hours[weekdayIdx(d) * 24 + d.getHours()]++;
     h.total++;
+    if (artist && track) {
+      const key = trackKey(artist, track), e = h.tracks[key];
+      if (e) { if (uts < e[0]) e[0] = uts; if (uts > e[1]) e[1] = uts; e[2]++; }
+      else { const ne = [uts, uts, 1], lt = looseTitle(track); if (lt !== norm(track)) ne[3] = lt; h.tracks[key] = ne; }      // [first, last, count, plain title (only when the name carries a version note)]
+    }
     if (artist) {
       const a = h.artists[artist];
       if (a) { a[0] = Math.min(a[0], uts); a[1]++; } else h.artists[artist] = [uts, 1];
@@ -372,7 +452,12 @@ class RecapService {
       const u = this.user();
       if (force || (this.hist.user && this.hist.user.toLowerCase() !== u.toLowerCase())) { this.hist = emptyHistory(); }
       this.hist.user = u;
-      if (!this.hist.full) await this._fullSync(); else await this._incremental();
+      if (this.hist.full && !this.hist.tracksIndexed) {
+        // history saved by an older Prism: download it again ONCE to learn the plays of every song. The old copy stays in use (and on disk) until the new one is complete.
+        const old = this.hist; this._reindex = true;
+        this.hist = emptyHistory(); this.hist.user = u;
+        try { await this._fullSync(); } catch (e) { this.hist = old; throw e; } finally { this._reindex = false; }
+      } else if (!this.hist.full) await this._fullSync(); else await this._incremental();
       this.hist.updatedAt = this.now();
       this.histStore.set(this.hist); this.histStore.saveNow();
       st.phase = 'done'; st.full = this.hist.full; st.scrobbles = this.hist.total;
@@ -402,7 +487,7 @@ class RecapService {
       h.cursor = { to, page };
       st.scrobbles = h.total;
       if (page > totalPages || page > this.maxPages) { if (page > this.maxPages && page <= totalPages) h.truncated = true; break; }
-      if (page % 5 === 0) { this.histStore.set(h); this.histStore.saveNow(); }
+      if (page % 5 === 0 && !this._reindex) { this.histStore.set(h); this.histStore.saveNow(); }
     }
     this._prune();
     h.full = true; h.cursor = null;
@@ -432,4 +517,4 @@ class RecapService {
   }
 }
 
-module.exports = { RecapService, RecapError, computeAnalytics, emptyHistory, dayKey, addDays, PERIODS };
+module.exports = { RecapService, RecapError, computeAnalytics, periodStats, emptyHistory, dayKey, addDays, PERIODS, trackKey, norm, normArtist, looseTitle };

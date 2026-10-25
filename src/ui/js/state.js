@@ -18,7 +18,7 @@ export const S = {
   view: 'artist-album',
   filter: '',
   expanded: new Set(),
-  layout: { left: 300, right: 330, hideLib: false, hideSide: false, hideViz: false, lyrics: false, viz: ['spectrum', 'scope', 'gram', 'meter'] },
+  layout: { left: 300, right: 330, hideLib: false, hideSide: false, hideViz: false, sideFull: false, lyrics: false, viz: ['spectrum', 'scope', 'gram', 'meter'] },
   follow: true,
   stopAfter: false,
   resume: null,

@@ -4,7 +4,7 @@ import { S, on, emit, loadAll, loadLibrary, persist, saveNow, saveSettings, crea
 import { engine } from './player.js';
 import { P, playItem, toggle, stop, next, prev, seekBy, order, initMediaSession } from './playback.js';
 import { initTheme, themeForTrack, styleOf } from './theme.js';
-import { initViz } from './viz.js';
+import { initViz, vizApi } from './viz.js';
 import { initLibraryView } from './libview.js';
 import { initPlaylistView, newPlaylist, sortBy, shufflePlaylist } from './plview.js';
 import { initSideView } from './sideview.js';
@@ -19,6 +19,10 @@ import { addFilesToPlaylist, rescan, revealTrack } from './actions.js';
 import { ORDERS } from './queue.js';
 import { resolveBindings, eventToCombo, shouldFire, actionFor, pretty, globalList } from './hotkeys.js';
 import { initDropFiles } from './dropfiles.js';
+import { initLiquid, shakeLiquid } from './liquid.js';
+import { initWindowControls } from './winctl.js';
+import { initDj, djLabel, toggleDjPanel, paintDjBadge } from './dj.js';
+import { initLfStats } from './lfstats.js';
 
 const $ = (id) => document.getElementById(id);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -57,6 +61,8 @@ function applyLayout() {
   app.classList.toggle('hide-lib', !!S.layout.hideLib);
   app.classList.toggle('hide-side', !!S.layout.hideSide);
   app.classList.toggle('no-viz', !!S.layout.hideViz);
+  main.classList.toggle('no-viz', !!S.layout.hideViz);
+  main.classList.toggle('side-full', !!S.layout.sideFull);          // Now playing runs the full height (no visualiser row under it)
 }
 function initSplitters() {
   const drag = (el, side) => {
@@ -111,6 +117,8 @@ function menuDefs() {
       { label: 'Library panel', checked: !S.layout.hideLib, action: () => toggleLayout('hideLib') },
       { label: 'Info panel', checked: !S.layout.hideSide, action: () => toggleLayout('hideSide') },
       { label: 'Visualisers', checked: !S.layout.hideViz, action: () => toggleLayout('hideViz') },
+      { label: 'Visualisers at the top', checked: !!S.layout.vizTop, disabled: !!S.layout.hideViz, action: () => vizApi.setTop(!S.layout.vizTop) },
+      { label: 'Visualiser under Now playing', checked: !S.layout.sideFull, disabled: !!S.layout.hideViz, action: () => toggleLayout('sideFull') },
       { label: 'Lyrics on the cover', key: 'L', checked: !!S.layout.lyrics, action: () => toggleLyrics() },
       { label: 'Fullscreen lyrics', key: 'F', checked: isFullscreen(), action: () => toggleFullscreen() },
       { sep: true },
@@ -118,7 +126,10 @@ function menuDefs() {
       { label: 'Scroll to playing track', action: () => plView.scrollToPlaying() },
       { sep: true },
       { label: 'Colours', submenu: [['standard', 'Album colours'], ['vivid', 'Album colours: vivid'], ['mono', 'Black and white']].map(([id, l]) => ({ label: l, radio: styleOf(S.settings).colors === id, action: () => saveSettings({ appearance: { colors: id }, dynamicColors: id !== 'mono' }) })) },
-      { label: 'Look', submenu: [['flat', 'Flat'], ['frost', 'Frosted pastel']].map(([id, l]) => ({ label: l, radio: styleOf(S.settings).look === id, disabled: styleOf(S.settings).colors === 'mono', action: () => saveSettings({ appearance: { look: id } }) })) },
+      { label: 'Look', submenu: [['flat', 'Flat'], ['pastel', 'Pastel'], ['glass', 'Frosted glass'], ['frost', 'Frosted pastel'], ['liquid', 'Liquid']].map(([id, l]) => ({ label: l, radio: styleOf(S.settings).look === id, disabled: styleOf(S.settings).colors === 'mono', action: () => saveSettings({ appearance: { look: id } }) })) },
+      { label: 'Background blur', submenu: [['off', 'Off'], ['cover', 'Mild blur with album cover'], ['colours', 'Mild blur, colours only']].map(([id, l]) => ({ label: l, radio: styleOf(S.settings).blur === id, disabled: styleOf(S.settings).colors === 'mono' || styleOf(S.settings).look === 'liquid', action: () => saveSettings({ appearance: { blur: id } }) })) },
+      { label: 'Square corners', checked: !!styleOf(S.settings).square, action: () => saveSettings({ appearance: { square: !styleOf(S.settings).square } }) },
+      { label: 'Shake the liquid', disabled: styleOf(S.settings).look !== 'liquid' || styleOf(S.settings).colors === 'mono', action: () => shakeLiquid() },
     ] },
     { label: 'Playback', items: () => [
       { label: P.state === 'playing' ? 'Pause' : 'Play', key: 'Space', action: toggle },
@@ -139,6 +150,7 @@ function menuDefs() {
       { label: 'Scan ReplayGain (tracks without tags)', action: () => api.post('/api/replaygain/scan', {}).then(() => toast('Measuring loudness in the background…', { ms: 2500 })).catch((e) => toast(e.message, { error: true })) },
     ] },
     { label: 'Recap', html: ribbonLabel(), className: 'recap-btn', title: 'Your Last.fm listening recap: streaks, top artists, trends, charts and genres', action: openRecap },
+    { label: 'DJ', html: djLabel(), className: 'dj-btn', title: 'Music DJ: an endless auto-mix by genre or from the whole library', action: toggleDjPanel },
     { label: 'Help', items: () => [
       { label: 'Keyboard shortcuts', action: shortcutsDialog },
       { label: 'About Prism', action: () => aboutDialog(`${S.list.length} tracks in library.`) },
@@ -219,19 +231,24 @@ async function boot() {
   applyLayout();
   initTheme();
   initViz();
+  initLiquid();
+  initWindowControls();
   libView = initLibraryView();
   plView = initPlaylistView();
   initSideView();
   transport = initTransport();
   initLyrics({ slider });
   initScrobbleStatus();
+  initLfStats();
   initRecap();
+  initDj();
   document.addEventListener('prism:open-settings', (e) => settingsDialog({ onFoldersChanged: rescan, tab: e.detail }));
   initMediaSession();
   initSplitters();
   initKeys();
   initDropFiles({ dropIndex: (e) => plView.dropIndexAt(e), onDone: () => plView.hideDropLine() });
   mountMenuBar($('menubar'), menuDefs());
+  paintDjBadge();                           // the ribbon exists now: show the "DJ is mixing" pulse after a restart too
 
   window.__prismCurrentTrack = () => (P.cur ? P.cur.track : null);
   window.__prism = { S, P, engine, order, api }; // handy in the dev-tools console

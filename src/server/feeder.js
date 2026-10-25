@@ -15,8 +15,13 @@ const headFrames = (rate) => Math.round(rate * HEAD_SECONDS);
 
 function decoderArgs(track, startSec, rate, extraFilters) {
   const args = ['-v', 'error', '-nostdin'];
-  if (startSec > 0) args.push('-ss', startSec.toFixed(6));
-  args.push('-i', track.path, '-vn', '-map', '0:a:0', '-ac', '2');
+  // a track of a cue sheet is a stretch of a bigger file: seek to its start and stop at its end (times in seconds, to the microsecond, which is
+  // far finer than a sample, so neighbouring cue tracks join sample-exactly)
+  const ss = (track.cueStart > 0 ? track.cueStart : 0) + (startSec > 0 ? startSec : 0);
+  if (ss > 0) args.push('-ss', ss.toFixed(6));
+  args.push('-i', track.path);
+  if (track.cueEnd != null) args.push('-t', Math.max(0.001, track.cueEnd - ss).toFixed(6));
+  args.push('-vn', '-map', '0:a:0', '-ac', '2');
   const filters = [];
   // DSD has a lot of ultrasonic noise: use a long, sharp resampling filter when decimating it
   if (track.codecName && track.codecName.startsWith('dsd_')) filters.push('aresample=filter_size=96:cutoff=0.93');
@@ -37,7 +42,13 @@ class Decoder {
     this.proc.stderr.on('data', (d) => { if (this.stderr.length < 1500) this.stderr += d; });
     this.exited = new Promise((resolve) => { this.proc.on('close', (code) => resolve(code)); this.proc.on('error', () => resolve(-1)); });
   }
-  kill() { try { this.proc.kill(); } catch (_) { /* already gone */ } }
+  // A decoder nobody reads (a preloaded one) blocks on a full pipe and ignores a polite SIGTERM, so it would linger for ever holding the file open:
+  // close our end of the pipe (the writer then gets EPIPE) and kill it outright.
+  kill() {
+    if (this.killed) return; this.killed = true;
+    try { this.proc.stdout.destroy(); } catch (_) { /* ignore */ }
+    try { this.proc.kill('SIGKILL'); } catch (_) { /* already gone */ }
+  }
 
   // yields Buffers whose length is a multiple of BYTES_PER_FRAME
   async *chunks() {
@@ -77,7 +88,7 @@ function applyGain(buf, gain) {
  *         getNext() -> {id, tag, gain}|null (peek), takeNext() -> same, but clears the slot }
  * Closing the generator (return()/break) kills every ffmpeg process.
  */
-async function* feed(opts) {
+async function* feedRaw(opts) {
   const { library, rateFor, getNext, takeNext } = opts;   // getNext peeks, takeNext consumes the slot
   let cur = null, pre = null;
   const killAll = () => { if (cur) cur.dec.kill(); if (pre) pre.dec.kill(); };
@@ -155,4 +166,92 @@ async function* feed(opts) {
   }
 }
 
-module.exports = { feed, Decoder, BYTES_PER_FRAME, HEAD_SECONDS, headFrames };
+
+// ---------------------------------------------------------------------------------------------------- crossfade (the DJ's auto-mix)
+// Wraps the stream of feedRaw. While `opts.crossfade()` (seconds) is above zero the last N seconds of every track are held back; when the next track
+// starts they are mixed with its first N seconds (equal power: cos / sin, so the loudness stays constant) and the stream goes on with the rest of
+// the new track. The 'start' event of the new track is sent where the mix begins, so "now playing" flips when the overlap starts.
+// With crossfade 0 nothing is held back and nothing is touched: the stream is byte for byte the one of feedRaw (gapless, bit-exact).
+const MIN_MIX_FRAMES = 2048;
+const clampSample = (v) => (v > 1 ? 1 : v < -1 ? -1 : v);
+
+/** Equal-power mix of two float32 stereo buffers of the same length (in frames). Exported for the tests. */
+function mixBuffers(a, b) {
+  const frames = Math.min(a.length, b.length) / BYTES_PER_FRAME, out = Buffer.allocUnsafe(frames * BYTES_PER_FRAME);
+  for (let i = 0; i < frames; i++) {
+    const t = (i + 0.5) / frames, ga = Math.cos(t * Math.PI / 2), gb = Math.sin(t * Math.PI / 2);
+    for (let c = 0; c < 2; c++) {
+      const o = i * BYTES_PER_FRAME + c * 4;
+      out.writeFloatLE(clampSample(a.readFloatLE(o) * ga + b.readFloatLE(o) * gb), o);
+    }
+  }
+  return out;
+}
+
+async function* withCrossfade(raw, opts) {
+  let tail = Buffer.alloc(0), rate = 44100, ended = false, mix = null, lastRate = 0, prevDur = 0;
+  const fadeFrames = () => { const s = Number(opts.crossfade ? opts.crossfade() : 0); return s > 0 ? Math.round(Math.min(12, s) * rate) : 0; };
+  const pcm = (buf) => ({ k: 'pcm', buf });
+  // the mix is done once enough of the new track has arrived (or the new track ended): carry = end of the old one, head = start of the new one
+  const finishMix = () => {
+    const m = mix; mix = null;
+    const lf = Math.min(m.want, m.carry.length, m.head.length) / BYTES_PER_FRAME, lb = lf * BYTES_PER_FRAME;
+    const before = m.carry.subarray(0, m.carry.length - lb);
+    const mixed = mixBuffers(m.carry.subarray(m.carry.length - lb), m.head.subarray(0, lb));
+    return { before, mixed, rest: m.head.subarray(lb) };
+  };
+  try {
+    for await (const ev of raw) {
+      if (ev.k === 'pcm') {
+        let buf = ev.buf;
+        if (mix) {
+          mix.head = mix.head.length ? Buffer.concat([mix.head, buf]) : buf;
+          if (mix.head.length < mix.want) continue;
+          const r = finishMix();
+          if (r.before.length) yield pcm(r.before);
+          yield pcm(r.mixed);
+          buf = r.rest;
+          if (!buf.length) continue;
+        }
+        const F = fadeFrames();
+        if (!F) { if (tail.length) { yield pcm(tail); tail = Buffer.alloc(0); } yield pcm(buf); continue; }
+        tail = tail.length ? Buffer.concat([tail, buf]) : Buffer.from(buf);
+        const keep = F * BYTES_PER_FRAME;
+        if (tail.length > keep) { const out = tail.subarray(0, tail.length - keep); tail = Buffer.from(tail.subarray(tail.length - keep)); yield pcm(out); }
+      } else if (ev.k === 'end') {
+        if (mix) { const r = finishMix(); if (r.before.length) yield pcm(r.before); yield pcm(r.mixed); if (r.rest.length) tail = Buffer.from(r.rest); }   // the new track was shorter than the overlap
+        ended = true;
+        yield ev;
+      } else if (ev.k === 'start') {
+        const wasEnded = ended; ended = false;
+        if (wasEnded) {
+          // the overlap never takes more than 40 % of either track, so a very short track is still heard
+          const F = fadeFrames(), have = tail.length / BYTES_PER_FRAME, newDur = ev.track && ev.track.duration > 0 ? ev.track.duration - (ev.startSec || 0) : 0;
+          let L = Math.min(F, have);
+          if (prevDur > 0) L = Math.min(L, Math.floor((prevDur * ev.rate) / 2.5));
+          if (newDur > 0) L = Math.min(L, Math.floor((newDur * ev.rate) / 2.5));
+          if (F > 0 && L >= MIN_MIX_FRAMES && ev.rate === lastRate) {
+            mix = { carry: tail, head: Buffer.alloc(0), want: L * BYTES_PER_FRAME };
+            tail = Buffer.alloc(0);
+            rate = ev.rate; prevDur = newDur; yield ev; continue;
+          }
+          if (tail.length) { yield pcm(tail); tail = Buffer.alloc(0); }
+        }
+        rate = ev.rate; lastRate = ev.rate;
+        prevDur = ev.track && ev.track.duration > 0 ? Math.max(0, ev.track.duration - (ev.startSec || 0)) : 0;
+        yield ev;
+      } else {                                              // error / eoq: whatever is still held back is played out
+        if (mix) { const r = finishMix(); if (r.before.length) yield pcm(r.before); yield pcm(r.mixed); if (r.rest.length) yield pcm(r.rest); }
+        if (tail.length) { yield pcm(tail); tail = Buffer.alloc(0); }
+        yield ev;
+      }
+    }
+  } finally {
+    if (raw.return) await raw.return().catch(() => {});
+  }
+}
+
+/** The stream. opts.crossfade is an optional () => seconds (0 = none); everything else as in feedRaw. */
+function feed(opts) { return opts.crossfade ? withCrossfade(feedRaw(opts), opts) : feedRaw(opts); }
+
+module.exports = { feed, feedRaw, mixBuffers, Decoder, BYTES_PER_FRAME, HEAD_SECONDS, headFrames };

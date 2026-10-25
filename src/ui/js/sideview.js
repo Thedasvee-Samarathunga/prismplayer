@@ -2,8 +2,7 @@
 import { api } from './api.js';
 import { S, on } from './state.js';
 import { P } from './playback.js';
-import { ICON } from './icons.js';
-import { revealTrack } from './actions.js';
+import { lfFor, lfReady } from './lfstats.js';
 import { fmtTime, fmtDate, fmtSize, fmtRate, fmtBits, escapeHtml, displayArtist } from './fmt.js';
 
 let shown = null; // track currently shown
@@ -32,9 +31,19 @@ function rows(t) {
   if (t.rgAlbum != null) add('ReplayGain (album)', t.rgAlbum + ' dB');
   add('File Size', fmtSize(t.size));
   add('Location', t.path);
-  r.push(['Play Count', st ? st.plays : 0]);
-  r.push(['First Played', st ? fmtDate(st.first) : '—']);
-  r.push(['Last Played', st ? fmtDate(st.last) : '—']);
+  if (t.cue) add('Cue sheet', t.cuePath ? `${t.cuePath}  (track ${t.track}${t.trackTotal ? ' of ' + t.trackTotal : ''})` : `stored in the file  (track ${t.track})`);
+  // play statistics come from Last.fm (your whole listening history, on every device); without Last.fm this PC's own counts are shown instead
+  const lf = lfFor(t.id);
+  if (lf) {
+    r.push(['Play Count', lf[0], 'Last.fm']);
+    r.push(['First Played', lf[1] ? fmtDate(lf[1] * 1000) : '—', 'Last.fm']);
+    r.push(['Last Played', lf[2] ? fmtDate(lf[2] * 1000) : '—', 'Last.fm']);
+  } else {
+    const waiting = !lfReady() && S.lf && S.lf.user ? 'this PC · Last.fm loading' : (S.lf && S.lf.user ? 'this PC' : '');
+    r.push(['Play Count', st ? st.plays : 0, waiting]);
+    r.push(['First Played', st ? fmtDate(st.first) : '—', waiting]);
+    r.push(['Last Played', st ? fmtDate(st.last) : '—', waiting]);
+  }
   return r;
 }
 
@@ -43,8 +52,6 @@ function show(t) {
   const cover = document.getElementById('cover');
   const title = document.getElementById('np-title'), artist = document.getElementById('np-artist'), album = document.getElementById('np-album');
   const props = document.getElementById('props');
-  const fb = document.getElementById('np-folder');
-  fb.hidden = !t;
   if (!t) {
     cover.classList.remove('on'); cover.removeAttribute('src');
     title.textContent = ''; artist.textContent = ''; album.textContent = ''; props.innerHTML = '';
@@ -59,15 +66,13 @@ function show(t) {
     cover.onerror = () => cover.classList.remove('on');
     cover.src = url;
   }
-  props.innerHTML = '<table class="prop-table">' + rows(t).map(([k, v]) => `<tr><th>${escapeHtml(k)}</th><td>${escapeHtml(v)}</td></tr>`).join('') + '</table>';
+  props.innerHTML = '<table class="prop-table">' + rows(t).map(([k, v, src]) => `<tr><th>${escapeHtml(k)}${src ? ` <em class="src">${escapeHtml(src)}</em>` : ''}</th><td>${escapeHtml(v)}</td></tr>`).join('') + '</table>';
 }
 
 export function initSideView() {
-  const fb = document.getElementById('np-folder');
-  fb.innerHTML = `${ICON.openFolder}<span>Open containing folder</span>`;
-  fb.addEventListener('click', () => { if (shown) revealTrack(shown.id); });
   on('nowplaying', ({ track }) => show(track));
   on('stats', ({ id }) => { if (shown && shown.id === id) show(shown); });
+  on('lfstats', () => { if (shown) show(shown); });
   on('library', () => { if (shown && S.tracks.has(shown.id)) show(S.tracks.get(shown.id)); });
   // with nothing playing, show whatever is selected in the playlist
   on('select', ({ track }) => { if (!P.cur && track) show(track); });

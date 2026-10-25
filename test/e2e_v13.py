@@ -95,8 +95,14 @@ HIDE_CSS = "* { color: transparent !important; text-shadow: none !important; car
 TEXT_BOXES = """() => { const out = [], seen = new Set(), w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
   while (w.nextNode()) { const n = w.currentNode; if (!n.nodeValue.trim()) continue; const el = n.parentElement; if (!el || seen.has(el)) continue; seen.add(el);
     const cs = getComputedStyle(el); if (cs.visibility === 'hidden' || cs.display === 'none') continue;
-    const r = document.createRange(); r.selectNodeContents(n); const b = r.getBoundingClientRect(); if (b.width < 3 || b.height < 3 || b.right < 0 || b.bottom < 0 || b.left > innerWidth || b.top > innerHeight) continue;
-    out.push([b.left, b.top, b.right, b.bottom]); } return out; }"""
+    const r = document.createRange(); r.selectNodeContents(n); const b = r.getBoundingClientRect(); if (b.width < 3 || b.height < 3) continue;
+    let l = b.left, t = b.top, rt = b.right, bt = b.bottom, ok = true;      // only what a person can SEE: cut to every scrolling / clipping ancestor, drop invisible ones
+    for (let a = el.parentElement; a && a !== document.documentElement; a = a.parentElement) {
+      const s = getComputedStyle(a); if (s.opacity === '0') { ok = false; break; }
+      if (s.overflowX !== 'visible' || s.overflowY !== 'visible') { const ab = a.getBoundingClientRect(); l = Math.max(l, ab.left); t = Math.max(t, ab.top); rt = Math.min(rt, ab.right); bt = Math.min(bt, ab.bottom); }
+    }
+    if (!ok || rt - l < 3 || bt - t < 3 || rt < 0 || bt < 0 || l > innerWidth || t > innerHeight) continue;
+    out.push([l, t, rt, bt]); } return out; }"""
 def pixels_worst(pg, colors, hide_extra="", step=3, clip=None, text_boxes=True):
     """Makes ALL text transparent, screenshots, and returns the worst contrast of each text colour against the REAL pixels behind the text
     (the box of every visible text run). clip: only look at that rectangle (menus, lyrics). Slider rails and borders are not text, so they are not measured."""
@@ -220,13 +226,13 @@ def run():
         combos = [("standard", "flat"), ("vivid", "flat"), ("standard", "frost"), ("vivid", "frost"), ("mono", "flat")]
         play(pg, "Ember"); pg.click("#menubar >> text=File"); pg.click(".menu-item:has-text('Settings')"); pg.wait_for_selector(".tabs-inline")
         pg.click(".tabs-inline .tab:has-text('Appearance')"); pg.wait_for_selector("input[name=ap-colors]")
-        check("Appearance settings: 3 colour choices, 2 looks", pg.locator("input[name=ap-colors]").count() == 3 and pg.locator("input[name=ap-look]").count() == 2)
+        check("Appearance settings: 3 colour choices, 5 looks (flat, pastel, frosted glass, frosted pastel, liquid)", pg.locator("input[name=ap-colors]").count() == 3 and pg.locator("input[name=ap-look]").count() == 5)
         pg.locator("label.choice:has(input[value=vivid])").click(); pg.wait_for_timeout(1500)
         check("choosing 'vivid' applies at once", pg.evaluate("document.documentElement.dataset.colors") == "vivid")
         pg.locator("label.choice:has(input[value=frost])").click(); pg.wait_for_timeout(1500)
         check("choosing 'frosted' applies at once", pg.evaluate("document.documentElement.dataset.look") == "frost")
         pg.locator("label.choice:has(input[value=mono])").click(); pg.wait_for_timeout(1200)
-        check("black & white is always flat (the look choices are disabled)", pg.evaluate("document.documentElement.dataset.look") == "flat" and pg.locator("#ap-looks .choice.disabled").count() == 2)
+        check("black & white is always flat (the look choices are disabled)", pg.evaluate("document.documentElement.dataset.look") == "flat" and pg.locator("#ap-looks .choice.disabled").count() == 5)
         pg.screenshot(path=f"{OUT}/44-appearance-settings.png")
         pg.locator("label.choice:has(input[value=standard])").click(); pg.wait_for_timeout(600); pg.keyboard.press("Escape"); pg.wait_for_timeout(300)
         shots = {}
@@ -263,11 +269,12 @@ def run():
                 pg.keyboard.press("Escape"); pg.wait_for_timeout(150)
                 check(f"   {colors}/{look} '{title}': View menu text {w['fg']:.1f}:1 / {w['dim']:.1f}:1", min(w.values()) >= 4.5, str(w))
             play(pg, "Endurance", 0.4); pg.keyboard.press("l"); pg.wait_for_selector("#cover-wrap.lyr-on"); pg.wait_for_selector("#cover-lyrics .ly-line", timeout=8000); pg.wait_for_timeout(1500)
-            v = pg.evaluate(VARS); cols = {"fg": hex2rgb(v["--fg"]), "dim": hex2rgb(v["--dim"])}
-            w = pixels_worst(pg, cols, "", 4, pg.locator("#cover-lyrics").bounding_box(), text_boxes=False)
+            v = pg.evaluate("() => Object.fromEntries(['--ly-fg', '--ly-dim'].map(n => [n, getComputedStyle(document.documentElement).getPropertyValue(n).trim()]))"); cols = {"fg": hex2rgb(v["--ly-fg"]), "dim": hex2rgb(v["--ly-dim"])}      # lyrics have their own light-on-dark colours in every look
+            lb = pg.locator("#cover-lyrics").bounding_box(); lb = {"x": lb["x"] + 5, "y": lb["y"] + lb["height"] * 0.2, "width": lb["width"] - 10, "height": lb["height"] * 0.6}      # the top / bottom fifth fades out on purpose
+            w = pixels_worst(pg, cols, "", 4, lb, text_boxes=False)
             check(f"   {colors}/{look}: lyrics over the blurred cover {w['fg']:.1f}:1 / {w['dim']:.1f}:1", min(w.values()) >= 4.5, str(w))
             pg.keyboard.press("f"); pg.wait_for_selector("#fs:not([hidden])"); pg.wait_for_timeout(1200)
-            bx = pg.locator("#fs-lyrics").bounding_box(); bx["width"] *= 0.66
+            bx = pg.locator("#fs-lyrics").bounding_box(); bx["width"] *= 0.66; bx["y"] += bx["height"] * 0.18; bx["height"] *= 0.64
             w = pixels_worst(pg, cols, "", 5, bx, text_boxes=False)
             if look == "frost": pg.screenshot(path=f"{OUT}/46-fullscreen-{colors}-{look}.png")
             check(f"   {colors}/{look}: fullscreen lyrics {w['fg']:.1f}:1 / {w['dim']:.1f}:1", min(w.values()) >= 4.5, str(w))

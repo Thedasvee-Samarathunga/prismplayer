@@ -7,6 +7,8 @@ import { toHex, mix } from './color.js';
 const hex = (c) => toHex(c);
 const rgba = (c, a) => `rgba(${Math.round(c.r * 255)},${Math.round(c.g * 255)},${Math.round(c.b * 255)},${a})`;
 const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
+// corner radius: 0 when the user chose square corners
+const rad = (f, r) => (f && f.square ? 0 : r);
 
 // The Vivid colour mode gives each theme 4 shades taken from the cover; the standard look keeps its two accents (drawn exactly as before).
 const multi = (t) => !!(t.shades && t.shades.length > 2);
@@ -62,7 +64,7 @@ function spectrum() {
         if (bars[i] < 0.012) continue;
         const bh = Math.max(2 * dpr, bars[i] * H), x = x0 + i * (bw + gap);
         if (multi(t)) c.fillStyle = hex(shadeAt(t, i / (n - 1)));
-        c.beginPath(); c.roundRect(x, base - bh, bw, bh, Math.min(3 * dpr, bw / 2)); c.fill();
+        c.beginPath(); c.roundRect(x, base - bh, bw, bh, rad(f, Math.min(3 * dpr, bw / 2))); c.fill();
       }
       c.shadowBlur = 0; c.fillStyle = hex(t.fg);
       for (let i = 0; i < n; i++) if (peaks[i] > 0.03 && peaks[i] > bars[i] + 0.02) c.fillRect(x0 + i * (bw + gap), base - peaks[i] * H - 3 * dpr, bw, 2 * dpr);
@@ -111,8 +113,8 @@ function mirror() {
       c.shadowColor = rgba(t.accent, 0.5); c.shadowBlur = 8 * dpr;
       for (let i = 0; i < n; i++) {
         const bh = Math.max(1.5 * dpr, bars[i] * half), x = x0 + i * (bw + gap);
-        c.fillStyle = multi(t) ? hex(shadeAt(t, i / (n - 1))) : up; c.beginPath(); c.roundRect(x, mid - bh, bw, bh, Math.min(3 * dpr, bw / 2)); c.fill();
-        c.fillStyle = rgba(t.accent2, 0.55); c.beginPath(); c.roundRect(x, mid + 1.5 * dpr, bw, bh * 0.85, Math.min(3 * dpr, bw / 2)); c.fill();
+        c.fillStyle = multi(t) ? hex(shadeAt(t, i / (n - 1))) : up; c.beginPath(); c.roundRect(x, mid - bh, bw, bh, rad(f, Math.min(3 * dpr, bw / 2))); c.fill();
+        c.fillStyle = rgba(t.accent2, 0.55); c.beginPath(); c.roundRect(x, mid + 1.5 * dpr, bw, bh * 0.85, rad(f, Math.min(3 * dpr, bw / 2))); c.fill();
       }
       c.shadowBlur = 0; c.fillStyle = rgba(t.fg, 0.14); c.fillRect(pad, mid - 0.5 * dpr, w - pad * 2, 1 * dpr);
     },
@@ -160,7 +162,7 @@ function radial() {
       bass = b > bass ? b : bass * 0.9;
       if (f.live) spin += f.dt * 0.00006;
       const cx = w / 2, cy = h / 2, R = Math.min(w, h) / 2 - 10 * dpr, r0 = R * (0.38 + bass * 0.06), len = R - r0;
-      c.lineCap = 'round'; c.lineWidth = Math.max(2 * dpr, (Math.PI * 2 * r0) / n * 0.55);
+      c.lineCap = f.square ? 'butt' : 'round'; c.lineWidth = Math.max(2 * dpr, (Math.PI * 2 * r0) / n * 0.55);
       c.shadowColor = rgba(t.accent, 0.5); c.shadowBlur = 8 * dpr;
       for (let i = 0; i < n; i++) {
         const a = spin * Math.PI * 2 + (i / n) * Math.PI * 2 - Math.PI / 2, l = Math.max(2 * dpr, bars[i] * len);
@@ -264,9 +266,9 @@ function meter() {
       c.font = `600 ${10 * dpr}px Montserrat, sans-serif`; c.textBaseline = 'middle';
       [['L', m.L, m.hL], ['R', m.R, m.hR]].forEach(([name, v, hold], i) => {
         const y = y0 + i * (bh + gap);
-        c.fillStyle = rgba(t.fg, 0.1); c.beginPath(); c.roundRect(x0, y, bw, bh, bh / 2); c.fill();
+        c.fillStyle = rgba(t.fg, 0.1); c.beginPath(); c.roundRect(x0, y, bw, bh, rad(f, bh / 2)); c.fill();
         const g = c.createLinearGradient(x0, 0, x0 + bw, 0); g.addColorStop(0, hex(t.accent2)); g.addColorStop(0.8, hex(t.accent)); g.addColorStop(1, hex(t.fg));
-        c.fillStyle = g; if (v > 0.01) { c.beginPath(); c.roundRect(x0, y, Math.max(bh, bw * v), bh, bh / 2); c.fill(); }
+        c.fillStyle = g; if (v > 0.01) { c.beginPath(); c.roundRect(x0, y, Math.max(bh, bw * v), bh, rad(f, bh / 2)); c.fill(); }
         c.fillStyle = hex(t.fg); c.fillRect(x0 + Math.max(bh / 2, bw * hold) - 1.5 * dpr, y, 3 * dpr, bh);
         c.fillStyle = hex(t.dim); c.fillText(name, pad, y + bh / 2);
       });
@@ -276,33 +278,103 @@ function meter() {
   };
 }
 
-// ------------------------------------------------------------------------------------ analogue VU needles
+// ------------------------------------------------------------------------------------ analogue VU meters
+// Two backlit dials: the classic scale (-20 ... +3 VU on the voltage curve), a hatched hot zone, minor ticks, a tapered needle with a shadow
+// and a counterweight, spring-damped ballistics (a hair of overshoot, like the real thing), a peak lamp and a glass glare.
+// 0 VU = -16 dBFS RMS. Colours come from the visualiser palette (the album's shades).
+const VU_STEPS = [-20, -19, -18, -17, -16, -15, -14, -13, -12, -11, -10, -9, -8, -7, -6, -5, -4, -3, -2, -1, 0, 1, 2, 3];
+const VU_LABELS = new Map([[-20, '20'], [-10, '10'], [-7, '7'], [-5, '5'], [-3, '3'], [-2, '2'], [-1, '1'], [0, '0'], [1, '+1'], [2, '+2'], [3, '+3']]);
+const VU_BIG = new Set([-20, -10, -7, -5, -3, 0, 3]);
+export const VU_REF_DBFS = -16;
+/** needle deflection 0..1 for a level in VU (linear in voltage, like a real meter) */
+export function vuPos(db) { return clamp01((Math.pow(10, db / 20) - 0.1) / (Math.pow(10, 3 / 20) - 0.1)); }
+/** one step of the needle: a damped spring (~300 ms to reach the level, about 1 % overshoot) */
+export function vuStep(n, target, dtSec) {
+  const K = 130, C = 2 * 0.82 * Math.sqrt(K), steps = Math.max(1, Math.ceil(dtSec / 0.008)), h = dtSec / steps;
+  for (let i = 0; i < steps; i++) { const acc = K * (target - n.x) - C * n.v; n.v += acc * h; n.x += n.v * h; }
+  n.x = Math.max(-0.03, Math.min(1.06, n.x));
+  return n.x;
+}
+function peakOf(buf) { let m = 0; if (buf) for (let i = 0; i < buf.length; i++) { const v = Math.abs(buf[i]); if (v > m) m = v; } return m; }
+
 function vu() {
-  const n = { L: -40, R: -40 };
+  const needle = [{ x: 0, v: 0, lamp: 0 }, { x: 0, v: 0, lamp: 0 }];
+  const TH = (50 * Math.PI) / 180;                                   // half of the swept angle
   return {
     draw(c, f) {
-      const { w, h, dpr, t, L, R } = f;
-      const tgtL = f.live && L ? rmsDb(L) : -60, tgtR = f.live && R ? rmsDb(R) : -60;
-      const k = 1 - Math.exp(-f.dt / 160);                                // ~300 ms VU ballistics
-      n.L += (tgtL - n.L) * k; n.R += (tgtR - n.R) * k;
-      const gauge = (cx, cy, r, db, label) => {
-        const lo = -36, hi = 3, a0 = Math.PI * 1.18, a1 = Math.PI * 1.82, ang = (d) => a0 + ((Math.max(lo, Math.min(hi, d)) - lo) / (hi - lo)) * (a1 - a0);
-        c.lineWidth = 3 * dpr; c.lineCap = 'round';
-        c.strokeStyle = rgba(t.fg, 0.14); c.beginPath(); c.arc(cx, cy, r, a0, a1); c.stroke();
-        c.strokeStyle = hex(t.accent2); c.beginPath(); c.arc(cx, cy, r, ang(-36), ang(-6)); c.stroke();
-        c.strokeStyle = hex(t.accent); c.beginPath(); c.arc(cx, cy, r, ang(-6), ang(3)); c.stroke();
-        c.font = `600 ${9 * dpr}px Montserrat, sans-serif`; c.fillStyle = hex(t.dim); c.textBaseline = 'middle';
-        for (const d of [-30, -20, -10, -3, 0]) { const a = ang(d), r1 = r - 4 * dpr, r2 = r - 10 * dpr; c.lineWidth = dpr; c.strokeStyle = rgba(t.fg, 0.45); c.beginPath(); c.moveTo(cx + Math.cos(a) * r1, cy + Math.sin(a) * r1); c.lineTo(cx + Math.cos(a) * r2, cy + Math.sin(a) * r2); c.stroke(); }
-        const a = ang(db);
-        c.lineWidth = 2 * dpr; c.strokeStyle = hex(t.fg); c.shadowColor = rgba(t.accent, 0.6); c.shadowBlur = 6 * dpr;
-        c.beginPath(); c.moveTo(cx, cy); c.lineTo(cx + Math.cos(a) * (r - 6 * dpr), cy + Math.sin(a) * (r - 6 * dpr)); c.stroke(); c.shadowBlur = 0;
-        c.fillStyle = hex(t.accent); c.beginPath(); c.arc(cx, cy, 4 * dpr, 0, Math.PI * 2); c.fill();
-        c.fillStyle = hex(t.dim); c.textAlign = 'center'; c.fillText(label, cx, cy + 14 * dpr); c.textAlign = 'left';
-      };
-      const r = Math.min(w / 2 - 14 * dpr, h * 0.92) * 0.9, cy = h * 0.86;
-      gauge(w * 0.25, cy, Math.min(r, w * 0.22), n.L, 'L'); gauge(w * 0.75, cy, Math.min(r, w * 0.22), n.R, 'R');
+      const { w, h, dpr, t } = f, bufs = [f.L, f.R], dt = Math.min(0.06, (f.dt || 16.7) / 1000);
+      const pad = 8 * dpr, gap = 8 * dpr, wide = w / h > 1.25;
+      const mw = wide ? (w - pad * 2 - gap) / 2 : w - pad * 2, mh = wide ? h - pad * 2 : (h - pad * 2 - gap) / 2;
+      for (let i = 0; i < 2; i++) {
+        const n = needle[i], live = f.live && bufs[i];
+        const lvl = live ? rmsDb(bufs[i]) - VU_REF_DBFS : -40;
+        vuStep(n, vuPos(lvl), dt);
+        n.lamp = Math.max(n.lamp * Math.pow(0.04, dt), live && peakOf(bufs[i]) >= 0.89 ? 1 : 0);
+        const x = wide ? pad + i * (mw + gap) : pad, y = wide ? pad : pad + i * (mh + gap);
+        dial(c, f, t, x, y, mw, mh, n, i === 0 ? 'L' : 'R', clamp01((lvl + 22) / 25));
+      }
     },
   };
+
+  function dial(c, f, t, x, y, mw, mh, n, name, glow) {
+    const { dpr } = f, cx = x + mw / 2, py = y + mh * 0.9;
+    const R = Math.max(8 * dpr, Math.min((mw / 2 - 10 * dpr) / (Math.sin(TH) * 1.2), (py - y - 8 * dpr) / 1.3));
+    const ang = (p) => -TH + 2 * TH * p, pt = (p, r) => { const a = ang(p); return [cx + Math.sin(a) * r, py - Math.cos(a) * r]; };
+    const hot = vuPos(0), face = rad(f, 10 * dpr);
+    c.save();
+    // ---- face: tinted from the album, lit from behind in proportion to the level
+    c.beginPath(); c.roundRect(x, y, mw, mh, face); c.clip();
+    const g = c.createLinearGradient(0, y, 0, y + mh);
+    g.addColorStop(0, hex(mix(t.panel, t.accent, 0.2))); g.addColorStop(1, hex(mix(t.panel, t.accent2, 0.07)));
+    c.fillStyle = g; c.fillRect(x, y, mw, mh);
+    const bl = c.createRadialGradient(cx, py - R * 0.55, 0, cx, py - R * 0.55, R * 1.35);
+    bl.addColorStop(0, rgba(t.accent, 0.14 + 0.3 * glow)); bl.addColorStop(1, rgba(t.accent, 0));
+    c.fillStyle = bl; c.fillRect(x, y, mw, mh);
+
+    // ---- scale: a thin arc, a hatched hot zone, minor and major ticks, numbers
+    c.lineCap = 'butt';
+    c.lineWidth = 1.6 * dpr; c.strokeStyle = rgba(t.fg, 0.55);
+    c.beginPath(); c.arc(cx, py, R, ang(0) - Math.PI / 2, ang(hot) - Math.PI / 2); c.stroke();
+    c.lineWidth = 5 * dpr; c.strokeStyle = hex(t.accent); c.setLineDash([2.4 * dpr, 1.6 * dpr]);
+    c.beginPath(); c.arc(cx, py, R - 1.2 * dpr, ang(hot) - Math.PI / 2, ang(1) - Math.PI / 2); c.stroke(); c.setLineDash([]);
+    c.lineWidth = 1.6 * dpr; c.strokeStyle = hex(t.accent);
+    c.beginPath(); c.arc(cx, py, R + 2.4 * dpr, ang(hot) - Math.PI / 2, ang(1) - Math.PI / 2); c.stroke();
+    const fs = Math.max(7.5 * dpr, R * 0.1), showAll = R > 46 * dpr;
+    c.font = `700 ${fs}px Montserrat, sans-serif`; c.textAlign = 'center'; c.textBaseline = 'middle';
+    for (const db of VU_STEPS) {
+      const p = vuPos(db), big = VU_BIG.has(db), len = R * (big ? 0.1 : 0.055);
+      const [x1, y1] = pt(p, R), [x2, y2] = pt(p, R + len);
+      c.lineWidth = (big ? 1.7 : 1) * dpr; c.strokeStyle = db > 0 ? hex(t.accent) : rgba(t.fg, big ? 0.9 : 0.5);
+      c.beginPath(); c.moveTo(x1, y1); c.lineTo(x2, y2); c.stroke();
+      if (VU_LABELS.has(db) && (showAll || VU_BIG.has(db))) { const [lx, ly] = pt(p, R + len + fs * 0.95); c.fillStyle = db > 0 ? hex(t.accent) : hex(t.dim); c.fillText(VU_LABELS.get(db), lx, ly); }
+    }
+    c.font = `800 ${Math.max(9 * dpr, R * 0.17)}px Montserrat, sans-serif`; c.fillStyle = rgba(t.fg, 0.5); c.fillText('VU', cx, py - R * 0.4);
+    c.font = `700 ${Math.max(7.5 * dpr, R * 0.1)}px Montserrat, sans-serif`; c.fillStyle = hex(t.dim); c.textAlign = 'left'; c.fillText(name, x + 9 * dpr, y + mh - 11 * dpr);
+
+    // ---- needle: shadow, tapered body in the album's colours, counterweight, hub
+    const a = ang(n.x), s1 = Math.sin(a), c1 = Math.cos(a), len = R * 1.06, bw = Math.max(1.6 * dpr, R * 0.035);
+    const tri = (ox, oy) => { c.beginPath(); c.moveTo(cx + ox - c1 * bw, py + oy - s1 * bw); c.lineTo(cx + ox + s1 * len, py + oy - c1 * len); c.lineTo(cx + ox + c1 * bw, py + oy + s1 * bw); c.lineTo(cx + ox - s1 * R * 0.2, py + oy + c1 * R * 0.2); c.closePath(); };
+    c.fillStyle = 'rgba(0,0,0,0.38)'; c.shadowColor = 'rgba(0,0,0,0.5)'; c.shadowBlur = 4 * dpr; tri(2.4 * dpr, 3 * dpr); c.fill(); c.shadowBlur = 0;
+    const ng = c.createLinearGradient(cx, py, cx + s1 * len, py - c1 * len); ng.addColorStop(0, hex(mix(t.fg, t.accent2, 0.5))); ng.addColorStop(0.55, hex(t.fg)); ng.addColorStop(1, hex(mix(t.fg, t.accent, 0.55)));
+    c.fillStyle = ng; tri(0, 0); c.fill();
+    const hr = Math.max(4 * dpr, R * 0.075), hg = c.createRadialGradient(cx - hr * 0.3, py - hr * 0.35, 0, cx, py, hr);
+    hg.addColorStop(0, hex(mix(t.fg, t.accent, 0.2))); hg.addColorStop(0.6, hex(t.accent2)); hg.addColorStop(1, hex(mix(t.panel, t.accent2, 0.3)));
+    c.fillStyle = hg; c.beginPath(); c.arc(cx, py, hr, 0, Math.PI * 2); c.fill();
+    c.lineWidth = dpr; c.strokeStyle = rgba(t.panel, 0.7); c.stroke();
+
+    // ---- peak lamp (lights when the signal gets within 1 dB of full scale)
+    const lr = Math.max(3 * dpr, R * 0.045), lx = x + mw - 12 * dpr - lr, ly = y + 12 * dpr + lr;
+    c.fillStyle = rgba(t.dim, 0.25); c.beginPath(); c.arc(lx, ly, lr, 0, Math.PI * 2); c.fill();
+    if (n.lamp > 0.02) { c.shadowColor = hex(t.accent); c.shadowBlur = 10 * dpr * n.lamp; c.fillStyle = rgba(t.accent, 0.35 + 0.65 * n.lamp); c.beginPath(); c.arc(lx, ly, lr, 0, Math.PI * 2); c.fill(); c.shadowBlur = 0; }
+
+    // ---- glass glare
+    const gl = c.createLinearGradient(x, y, x + mw * 0.6, y + mh * 0.6); gl.addColorStop(0, 'rgba(255,255,255,0.13)'); gl.addColorStop(1, 'rgba(255,255,255,0)');
+    c.fillStyle = gl; c.beginPath(); c.moveTo(x, y); c.lineTo(x + mw * 0.66, y); c.lineTo(x + mw * 0.2, y + mh * 0.62); c.lineTo(x, y + mh * 0.74); c.closePath(); c.fill();
+    c.restore();
+    // ---- bezel
+    c.lineWidth = 1.5 * dpr; c.strokeStyle = rgba(t.fg, 0.22); c.beginPath(); c.roundRect(x + 0.75 * dpr, y + 0.75 * dpr, mw - 1.5 * dpr, mh - 1.5 * dpr, face); c.stroke();
+    c.textAlign = 'left';
+  }
 }
 
 // ------------------------------------------------------------------------------------ level history
@@ -370,9 +442,10 @@ export const VIZ_IDS = VIZ.map((v) => v.id);
 export const DEFAULT_VIZ = ['spectrum', 'scope', 'gram', 'meter'];
 export const vizById = (id) => VIZ.find((v) => v.id === id) || null;
 
-// a saved list of four panel choices -> always four valid ids (unknown / missing ones fall back to the defaults)
-export function sanitizeViz(list) {
+// a saved list of panel choices -> exactly n valid ids (unknown / missing ones are replaced by visualisers that no other panel shows)
+export function sanitizeViz(list, n = 4) {
   const out = [];
-  for (let i = 0; i < 4; i++) out.push(Array.isArray(list) && VIZ_IDS.includes(list[i]) ? list[i] : DEFAULT_VIZ[i]);
+  for (let i = 0; i < n; i++) out.push(Array.isArray(list) && VIZ_IDS.includes(list[i]) ? list[i] : null);
+  for (let i = 0; i < n; i++) if (!out[i]) out[i] = (DEFAULT_VIZ.slice(i, i + 1).find((d) => !out.includes(d))) || VIZ_IDS.find((d) => !out.includes(d)) || VIZ_IDS[i % VIZ_IDS.length];
   return out;
 }

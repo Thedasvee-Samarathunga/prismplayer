@@ -13,6 +13,9 @@ const fs = require('fs');
 const os = require('os');
 const boot = require('./boot');
 
+// the Windows taskbar groups windows, pins and shows the icon by this id (it must match the installer's appId, see package.json)
+if (typeof app.setAppUserModelId === 'function') app.setAppUserModelId('com.prism.player');
+
 const args = boot.parseArgs(process.argv);
 if (args.smoke) app.setPath('userData', fs.mkdtempSync(path.join(os.tmpdir(), 'prism-smoke-')));      // a throw-away profile: never collides with a running Prism
 
@@ -100,9 +103,10 @@ async function createWindow() {
   win = new BrowserWindow({
     width: b.width || 1480, height: b.height || 900, x: b.x, y: b.y, minWidth: 900, minHeight: 600,
     backgroundColor: '#000000', show: false, title: 'Prism',
-    icon: path.join(__dirname, '..', 'build', 'icon.png'),
+    icon: ['icon.ico', 'icon.png'].map((n) => path.join(__dirname, '..', 'build', n)).find((f) => fs.existsSync(f)),       // (a packaged app takes the icon from the .exe itself)
+    // No native title bar and no native window buttons: the app draws its own minimise / maximise / close buttons in the theme's colours
+    // (the native overlay can only show one flat colour, which never matched the album colours). The title bar is a drag region.
     titleBarStyle: 'hidden',
-    titleBarOverlay: { color: '#0c0c0c', symbolColor: '#ffffff', height: 36 },
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true, nodeIntegration: false, spellcheck: false,
@@ -118,6 +122,8 @@ async function createWindow() {
   const tell = (ch, v) => { if (win && !win.isDestroyed()) win.webContents.send(ch, v); };
   win.on('enter-full-screen', () => tell('fullscreen', true));
   win.on('leave-full-screen', () => tell('fullscreen', false));
+  win.on('maximize', () => tell('win-state', { maximized: true }));
+  win.on('unmaximize', () => tell('win-state', { maximized: false }));
 
   let reloaded = false;
   win.webContents.on('did-finish-load', () => { if (boot.finishLaunch(userDataDir, launch)) log('start-up worked in safe mode: hardware acceleration stays off (start with --enable-gpu to try it again)'); });
@@ -147,6 +153,16 @@ ipcMain.on('titlebar', (_e, bg, fg) => {
   if (!win || win.isDestroyed() || typeof bg !== 'string' || typeof fg !== 'string') return;
   try { win.setTitleBarOverlay({ color: bg, symbolColor: fg, height: 36 }); } catch (_) { /* not supported */ }
 });
+// the app's own window buttons
+ipcMain.on('win-control', (_e, action) => {
+  if (!win || win.isDestroyed()) return;
+  try {
+    if (action === 'minimize') win.minimize();
+    else if (action === 'maximize') { if (win.isMaximized()) win.unmaximize(); else win.maximize(); }
+    else if (action === 'close') win.close();
+  } catch (e) { log('window control failed: ' + e.message); }
+});
+ipcMain.handle('win-state', () => ({ maximized: !!(win && !win.isDestroyed() && win.isMaximized()) }));
 ipcMain.on('show-in-folder', (_e, p) => { if (typeof p === 'string') shell.showItemInFolder(p); });
 ipcMain.on('fullscreen', (_e, on) => { if (win && !win.isDestroyed()) win.setFullScreen(!!on); });
 

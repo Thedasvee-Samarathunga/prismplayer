@@ -38,6 +38,7 @@ const MIME = {
 };
 
 function isAudioFile(p) { return AUDIO_EXT.has(path.extname(p).toLowerCase()); }
+function isCueFile(p) { return path.extname(p).toLowerCase() === '.cue'; }
 function isImageFile(p) { return IMAGE_EXT.has(path.extname(p).toLowerCase()); }
 
 // Codecs Chromium (Electron) can play straight from the file. Everything else goes through ffmpeg.
@@ -191,6 +192,7 @@ function normalizeProbe(p, file, stat) {
     rgAlbumPeak: parsePeak(tags.replaygain_album_peak),
     size: stat ? stat.size : 0,
     mtime: stat ? Math.floor(stat.mtimeMs) : 0,
+    cueText: tags.cuesheet && tags.cuesheet.length < 200000 ? tags.cuesheet : '',     // a cue sheet stored inside the file's tags
   };
 }
 
@@ -288,10 +290,13 @@ function wavHeader(plan) {
 }
 
 // Starts ffmpeg decoding `file` from `startSec` to raw little-endian PCM on stdout.
-function spawnPcm(file, plan, startSec) {
+function spawnPcm(file, plan, startSec, cue) {
   const args = ['-v', 'error', '-nostdin'];
-  if (startSec > 0) args.push('-ss', startSec.toFixed(6));
-  args.push('-i', file, '-vn', '-map', '0:a:0', '-ac', String(plan.ch), '-ar', String(plan.rate),
+  const ss = ((cue && cue.start) || 0) + (startSec || 0);
+  if (ss > 0) args.push('-ss', ss.toFixed(6));
+  args.push('-i', file);
+  if (cue && cue.end != null) args.push('-t', Math.max(0.001, cue.end - ss).toFixed(6));
+  args.push('-vn', '-map', '0:a:0', '-ac', String(plan.ch), '-ar', String(plan.rate),
     '-f', plan.bits === 16 ? 's16le' : 's24le', 'pipe:1');
   return spawn(FFMPEG, args, { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
 }
@@ -316,7 +321,7 @@ async function binariesOk() {
 }
 
 module.exports = {
-  FFMPEG, FFPROBE, AUDIO_EXT, MIME, isAudioFile, isImageFile, trackId,
+  FFMPEG, FFPROBE, AUDIO_EXT, MIME, isAudioFile, isCueFile, isImageFile, trackId,
   probeRaw, normalizeProbe, probeTrack, scanReplayGain, extractEmbeddedCover, scaleImageFile, findFolderCover,
   transcodePlan, wavHeader, spawnPcm, binariesOk,
 };

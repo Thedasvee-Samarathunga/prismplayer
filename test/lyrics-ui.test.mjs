@@ -72,7 +72,7 @@ test('bandLevels / rmsDb: silence is flat, a tone lights the right band, levels 
 test('every visualiser draws without throwing on a stub 2D context, with and without audio', () => {
   const noop = () => {};
   const grad = { addColorStop: noop };
-  const ctx = new Proxy({ canvas: { width: 300, height: 120 }, createLinearGradient: () => grad, createImageData: (w, h) => ({ width: w, height: h, data: new Uint8ClampedArray(w * h * 4) }) }, {
+  const ctx = new Proxy({ canvas: { width: 300, height: 120 }, createLinearGradient: () => grad, createRadialGradient: () => grad, createImageData: (w, h) => ({ width: w, height: h, data: new Uint8ClampedArray(w * h * 4) }) }, {
     get(t, k) { return k in t ? t[k] : noop; }, set(t, k, v) { t[k] = v; return true; },
   });
   const theme = Object.fromEntries(['bg', 'bg2', 'panel', 'panel2', 'border', 'fg', 'dim', 'accent', 'accent2'].map((k, i) => [k, { r: i / 10, g: 0.5, b: 0.3 }]));

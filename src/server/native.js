@@ -25,9 +25,10 @@ function findHelper() {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 class NativeEngine extends EventEmitter {
-  constructor({ library, bin, heads }) {
+  constructor({ library, bin, heads, crossfade }) {
     super();
     this.library = library;
+    this.crossfade = crossfade || null;
     this.heads = heads || null;
     this.bin = bin || findHelper();
     this.proc = null;
@@ -198,7 +199,7 @@ class NativeEngine extends EventEmitter {
     this.playing = !!autoplay;
     await this._send('S', autoplay ? '1' : '0');
     this.next = null;
-    this.gen = feed({ library: this.library, heads: this.heads, first: spec, rateFor: (t) => this.rateFor(t), getNext: () => this.next, takeNext: () => { const n = this.next; this.next = null; return n; } });
+    this.gen = feed({ library: this.library, heads: this.heads, first: spec, rateFor: (t) => this.rateFor(t), getNext: () => this.next, takeNext: () => { const n = this.next; this.next = null; return n; }, crossfade: this.crossfade });
     this._run(this.gen, my).catch((e) => { if (my === this.token) this.emit('event', { t: 'error', message: e.message }); });
   }
 

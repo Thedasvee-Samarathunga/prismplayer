@@ -4,7 +4,10 @@ const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 contextBridge.exposeInMainWorld('prismHost', {
   isElectron: true,
-  setTitleBar: (bg, fg) => ipcRenderer.send('titlebar', bg, fg),
+  // the app's own window buttons (minimise / maximise-restore / close)
+  windowControl: (action) => ipcRenderer.send('win-control', String(action)),
+  getWindowState: () => ipcRenderer.invoke('win-state'),
+  onWindowState: (cb) => ipcRenderer.on('win-state', (_e, s) => cb(s || {})),
   showItemInFolder: (p) => ipcRenderer.send('show-in-folder', p),
   // real window fullscreen (the UI also draws its own fullscreen lyrics screen)
   setFullscreen: (on) => ipcRenderer.send('fullscreen', !!on),

@@ -1,4 +1,4 @@
-// Colour modes (standard / vivid) x looks (flat / frost): every readability rule must hold for every cover.
+// Colour modes (standard / vivid) x looks (flat / pastel / glass / frost / liquid): every readability rule must hold for every cover.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { buildTheme, defaultTheme, checkTheme, extractPalette, contrast, luminance, toHsl, toHex, rgb8, chroma, MIN_TEXT, mix, windowExtremes, BACKDROPS, GLASS } from '../src/ui/js/color.js';
@@ -6,7 +6,7 @@ import { buildTheme, defaultTheme, checkTheme, extractPalette, contrast, luminan
 let seed = 99;
 const rnd = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
 const rc = () => ({ r: rnd(), g: rnd(), b: rnd() });
-const COMBOS = [['standard', 'flat'], ['vivid', 'flat'], ['standard', 'frost'], ['vivid', 'frost']];
+const COMBOS = ['flat', 'pastel', 'glass', 'frost', 'liquid'].flatMap((look) => [['standard', look], ['vivid', look]]);
 const hex = (h) => { const n = parseInt(h.slice(1), 16); return rgb8((n >> 16) & 255, (n >> 8) & 255, n & 255); };
 
 for (const [mode, look] of COMBOS) {
@@ -49,7 +49,9 @@ test('frost is a light theme with dark text; flat stays dark with light text', (
 test('frost surfaces are checked against everything the window can show behind the glass', () => {
   const t = buildTheme([{ c: hex('#e0a040'), w: 1 }], { mode: 'standard', look: 'frost' });
   const names = t.surfaces.map((s) => s[0]);
-  assert.ok(names.some((n) => n.startsWith('panel-glass')) && names.some((n) => n.startsWith('menu')) && names.some((n) => n.startsWith('cover-shade')) && names.some((n) => n.startsWith('fullscreen')));
+  assert.ok(names.some((n) => n.startsWith('panel-glass')) && names.some((n) => n.startsWith('menu')));
+  // the cover shade / fullscreen scrim are dark in every look, so on a light look they belong to the separate lyrics palette
+  assert.ok(!names.some((n) => n.startsWith('cover-shade')) && t.ly.surfaces.length >= 8, 'light looks check their lyrics palette separately');
   // brute force: a cover pixel of every grey level behind the panel can never push the text below 4.5:1
   const ext = windowExtremes([t.bg, t.bg2], BACKDROPS.frost, t.bg);
   for (let x = 0; x <= 1; x += 0.05) for (const c of [t.bg, t.bg2]) {

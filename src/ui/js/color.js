@@ -135,16 +135,39 @@ export function extractPalette(rgba, maxColors = 8, opts = {}) {
 // ---------------------------------------------------------------- theme
 // Two independent choices, both always derived from the album (there is no colour picker):
 //   mode: 'standard' | 'vivid'      how strongly the album colours are used
-//   look: 'flat' | 'frost'          flat = solid dark panels, frost = light pastel frosted glass over the blurred cover
+//   look: 'flat' | 'pastel' | 'glass' | 'frost' | 'liquid'
+//     flat   = solid dark panels                                    pastel = solid light pastel panels
+//     glass  = dark frosted glass over the blurred cover            frost  = light frosted pastel glass over the blurred cover
+//     liquid = dark glass over a live, shakeable fluid in the album's colours
 // ('mono' = the flat black / white / grey theme is defaultTheme('flat').)
 export const MODES = ['standard', 'vivid', 'mono'];
-export const LOOKS = ['flat', 'frost'];
+export const LOOKS = ['flat', 'pastel', 'glass', 'frost', 'liquid'];
+// Background blur (a third, independent choice): 'off' = the look as it is; 'cover' = the album cover behind everything, only mildly blurred, with
+// see-through panels that blur it a little more; 'colours' = no cover image, a soft field of the album's colours instead (same glass panels).
+// It changes the flat and pastel looks (which are solid otherwise); glass / frost / liquid are see-through already (liquid has its own background).
+export const BLURS = ['off', 'cover', 'colours'];
 
 // How the layers behind the panels are made (mirrored in css/app.css; the contrast guarantees are computed from these numbers):
-//   window = body gradient (bg -> bg2) + blurred cover at opacity `a` (cover pixels at most `max` bright) [+ a wash of bg at opacity `wash`]
-export const BACKDROPS = { standard: { a: 0.34, max: 0.55, wash: 0 }, vivid: { a: 0.46, max: 0.6, wash: 0 }, frost: { a: 0.62, max: 1, wash: 0.5 }, frostVivid: { a: 0.7, max: 1, wash: 0.42 } };
-export const GLASS = { panel: 0.74, menu: 0.94 };            // opacity of frosted panels / menus + dialogs
-export const OVERLAYS = {                                     // text sits on these over the cover (lyrics on the cover, fullscreen)
+//   window = body gradient (bg -> bg2) + blurred cover (or, for 'liquid', the fluid canvas) at opacity `a` (pixels at most `max` bright) [+ a wash of bg at opacity `wash`]
+export const BACKDROPS = {
+  standard: { a: 0.34, max: 0.55, wash: 0 }, vivid: { a: 0.46, max: 0.6, wash: 0 },
+  frost: { a: 0.62, max: 1, wash: 0.5 }, frostVivid: { a: 0.7, max: 1, wash: 0.42 },
+  pastel: { a: 0.5, max: 1, wash: 0.55 }, pastelVivid: { a: 0.6, max: 1, wash: 0.45 },
+  glass: { a: 0.6, max: 0.5, wash: 0.3 }, glassVivid: { a: 0.66, max: 0.56, wash: 0.26 },
+  liquid: { a: 0.7, max: 0.42, wash: 0.25 }, liquidVivid: { a: 0.76, max: 0.48, wash: 0.2 },
+  // flat / pastel with the background blur on (the cover is much more visible than in the plain looks, so the panels over it are see-through)
+  flatBlur: { a: 0.5, max: 0.6, wash: 0.12 }, flatBlurVivid: { a: 0.58, max: 0.66, wash: 0.08 },
+  pastelBlur: { a: 0.55, max: 1, wash: 0.42 }, pastelBlurVivid: { a: 0.62, max: 1, wash: 0.36 },
+};
+export const GLASS = { panel: 0.74, menu: 0.94, glass: 0.6, liquid: 0.42, mild: 0.8 };       // opacity of frosted panels / menus + dialogs
+// per look: light surfaces (dark text) or dark surfaces (light text), and how see-through the panels are (1 = solid)
+export const LOOK_INFO = {
+  flat: { light: false, glass: 1 }, pastel: { light: true, glass: 1 }, glass: { light: false, glass: GLASS.glass },
+  frost: { light: true, glass: GLASS.panel }, liquid: { light: false, glass: GLASS.liquid },
+};
+// Text on the cover (lyrics on the cover, fullscreen lyrics) always sits on a DARK shade over the darkened, blurred cover in every look,
+// so the lyrics are light-on-dark everywhere. (`frost` is kept for older callers; it is no longer used.)
+export const OVERLAYS = {
   dark: { shade: 0.58, shadeArt: 0.5, fs: 0.72, fsArt: 0.62 },
   frost: { shade: 0.64, shadeArt: 1, fs: 0.72, fsArt: 1 },
 };
@@ -153,10 +176,12 @@ const grey = (v) => ({ r: v, g: v, b: v });
 const BLACK = grey(0), WHITE = grey(1);
 
 // every colour the window background can show (cover pixel anywhere between black and `max`)
-export function windowExtremes(cols, bd, washColour) {
+export function windowExtremes(cols, bd, washColour, fluid) {
   const out = [];
-  for (const c of cols) for (const x of [0, bd.max]) {
-    let r = { r: c.r * (1 - bd.a) + x * bd.a, g: c.g * (1 - bd.a) + x * bd.a, b: c.b * (1 - bd.a) + x * bd.a };
+  // the layer behind the panels is either a blurred cover (any grey between black and `max`) or, for the liquid look, the fluid's actual colours
+  const xs = fluid && fluid.length ? [BLACK, ...fluid.flatMap((f) => [f.top, f.deep, f.foam])] : [0, bd.max].map(grey);
+  for (const c of cols) for (const x of xs) {
+    let r = { r: c.r * (1 - bd.a) + x.r * bd.a, g: c.g * (1 - bd.a) + x.g * bd.a, b: c.b * (1 - bd.a) + x.b * bd.a };
     if (bd.wash) r = mix(r, washColour || cols[0], bd.wash);
     out.push(r);
   }
@@ -177,20 +202,21 @@ function separate(c, refs, ratio) {
 // every surface text can land on, for given window colours / panel colours (shared by the solver and the headroom check)
 function surfaceList(bg, bg2, panel, panel2, cfg) {
   const glass = cfg.glass == null ? 1 : cfg.glass, ov = cfg.overlay;
-  const ext0 = windowExtremes([bg, bg2], cfg.backdrop, bg);
+  const ext0 = windowExtremes([bg, bg2], cfg.backdrop, bg, cfg.fluid);
   const ext = cfg.shadow ? [...ext0, ...ext0.map((w) => over(cfg.shadow.c, cfg.shadow.a, w))] : ext0;       // what can really be behind the text
   const panelEff = glass >= 1 ? [panel] : ext.map((w) => over(panel, glass, w));
   const menuEff = cfg.menuGlass >= 1 ? [panel] : [BLACK, WHITE].map((w) => over(panel, cfg.menuGlass, w));
   const shadeSurf = [BLACK, grey(ov.shadeArt)].flatMap((x) => [bg, bg2].map((c) => over(c, ov.shade, x)));
   const fsSurf = [BLACK, grey(ov.fsArt)].flatMap((x) => [bg, bg2].map((c) => over(c, ov.fs, x)));
-  return { ext, panelEff, menuEff, shadeSurf, fsSurf, all: [bg, bg2, ...ext, ...panelEff, panel2, ...menuEff, ...shadeSurf, ...fsSurf] };
+  // on dark looks the main text colours double as the lyrics colours, so they must also work on the cover shade; light looks have their own lyrics palette
+  return { ext, panelEff, menuEff, shadeSurf, fsSurf, all: [bg, bg2, ...ext, ...panelEff, panel2, ...menuEff, ...(cfg.light ? [] : [...shadeSurf, ...fsSurf])] };
 }
 
 // Vivid and frosted themes use brighter / more translucent layers. If any surface the text can land on is so mid-toned that even pure
 // black or white text could not reach a comfortable contrast, the window colours are pushed (darker for dark themes, lighter for light
 // ones) until there is headroom. The original flat/standard look is never touched.
 function finish(raw, cfg) {
-  if (cfg.mode !== 'vivid' && cfg.look !== 'frost') return finishOnce(raw, cfg);
+  if (cfg.mode !== 'vivid' && cfg.look === 'flat' && cfg.blur === 'off') return finishOnce(raw, cfg);
   const need = 5.4, shift = (c, d) => { const h = toHsl(c); h.l = clamp01(h.l + d); return fromHsl(h); };
   const dirOf = cfg.light ? 0.012 : -0.012, headroom = (c) => (cfg.light ? contrast(BLACK, c) : contrast(WHITE, c));
   let r = raw;
@@ -201,6 +227,9 @@ function finish(raw, cfg) {
   }
   return finishOnce(r, cfg);
 }
+
+// A colour that was tuned for a LIGHT surface (dark and strong), made bright and strong enough to glow on a DARK one (same hue).
+function liftForDark(c) { const h = toHsl(c); h.s = clamp01(Math.max(h.s, 0.55)); h.l = Math.min(0.78, Math.max(h.l, 0.62)); return fromHsl(h); }
 
 // Takes the raw (possibly unreadable) colours and enforces every contrast rule.
 function finishOnce(raw, cfg) {
@@ -233,11 +262,33 @@ function finishOnce(raw, cfg) {
   panelEff.forEach((c, i) => named.push(['panel' + (glass >= 1 ? '' : '-glass' + i), c]));
   named.push(['panel2', panel2]);
   menuEff.forEach((c, i) => named.push(['menu' + i, c]));
-  shadeSurf.forEach((c, i) => named.push(['cover-shade' + i, c]));
-  fsSurf.forEach((c, i) => named.push(['fullscreen' + i, c]));
+  if (!light) { shadeSurf.forEach((c, i) => named.push(['cover-shade' + i, c])); fsSurf.forEach((c, i) => named.push(['fullscreen' + i, c])); }
   const bgHi = backdropWorst(bg), bg2Hi = backdropWorst(bg2);     // (kept for older callers)
+
+  // ---- lyrics palette: always light text on a dark shade over the darkened cover (even in the light looks)
+  let ly;
+  if (!light) ly = { bg, bg2, fg, dim, accent, onAccent, surfaces: [] };
+  else {
+    const hb = toHsl(bg), lb = fromHsl({ h: hb.h, s: Math.min(0.5, hb.s), l: 0.09 }), lb2 = fromHsl({ h: hb.h, s: Math.min(0.45, hb.s), l: 0.06 });
+    const sv = [BLACK, grey(OVERLAYS.dark.shadeArt)].flatMap((x) => [lb, lb2].map((c) => over(c, OVERLAYS.dark.shade, x)))
+      .concat([BLACK, grey(OVERLAYS.dark.fsArt)].flatMap((x) => [lb, lb2].map((c) => over(c, OVERLAYS.dark.fs, x))));
+    const lyAcc = liftForDark(raw.shades && raw.shades.length ? raw.shades[raw.shades.length - 1] : raw.accent);
+    const lfg = ensureOver(fromHsl({ h: hb.h, s: 0.25, l: 0.97 }), sv, 7), ldim = ensureOver(fromHsl({ h: hb.h, s: 0.2, l: 0.78 }), sv, MIN_TEXT), lacc = ensureOver(lyAcc, sv, MIN_TEXT);
+    const lon = ensureOver(contrast(white, lacc) >= contrast(black, lacc) ? white : black, [lacc], MIN_TEXT);
+    ly = { bg: lb, bg2: lb2, fg: lfg, dim: ldim, accent: lacc, onAccent: lon, surfaces: sv.map((c, i) => ['lyrics-surface' + i, c]) };
+  }
+
+  // ---- visualiser palette: the visualiser tiles are always dark "screens" so the graphs never invert in a light look
+  let viz;
+  if (!light) viz = { panel, fg, dim, accent, accent2, shades };
+  else {
+    const hb = toHsl(bg), vp = fromHsl({ h: hb.h, s: Math.min(0.5, hb.s), l: 0.085 });
+    const vs = (raw.shades && raw.shades.length ? raw.shades : [raw.accent2, raw.accent]).map((c) => ensureOver(liftForDark(c), [vp], 3));
+    viz = { panel: vp, fg: ensureOver(fromHsl({ h: hb.h, s: 0.25, l: 0.97 }), [vp], 7), dim: ensureOver(fromHsl({ h: hb.h, s: 0.2, l: 0.78 }), [vp], MIN_TEXT),
+      accent: ensureOver(liftForDark(raw.accent), [vp], 3), accent2: ensureOver(liftForDark(raw.accent2), [vp], 3), shades: vs };
+  }
   return { bg, bg2, bgHi, bg2Hi, panel, panel2, border, fg, dim, accent, accent2, shades, selBg, selFg, selDim, accentSel, onAccent, onAccent2,
-    fromArt: true, light, glass, menuGlass: cfg.menuGlass, backdrop: cfg.backdrop, overlay: ov, look: cfg.look, mode: cfg.mode, surfaces: named, panelEff };
+    fromArt: true, light, glass, menuGlass: cfg.menuGlass, backdrop: cfg.backdrop, overlay: ov, look: cfg.look, mode: cfg.mode, blur: cfg.blur, surfaces: named, panelEff, ly, viz, fluid: cfg.fluid || null };
 }
 
 // Soft shadows / glows around the panels change the window colour just outside them (where the ribbon and status bar text sit) and under the
@@ -245,24 +296,27 @@ function finishOnce(raw, cfg) {
 const SHADOW_FROST = { c: { r: 40 / 255, g: 40 / 255, b: 80 / 255 }, a: 0.2 };
 const GLOW_VIVID = { c: WHITE, a: 0.12 };
 
-const CFG = (look, mode) => {
-  const frost = look === 'frost', vivid = mode === 'vivid';
+const CFG = (look, mode, blur = 'off') => {
+  const info = LOOK_INFO[look] || LOOK_INFO.flat, vivid = mode === 'vivid', light = info.light, translucent = info.glass < 1;
+  const mild = blur !== 'off' && (look === 'flat' || look === 'pastel');           // solid looks that become see-through with the background blur
+  const bdKey = mild ? look + 'Blur' + (vivid ? 'Vivid' : '') : (look === 'flat' ? (vivid ? 'vivid' : 'standard') : look + (vivid ? 'Vivid' : ''));
+  const key = BACKDROPS[bdKey] ? bdKey : (vivid ? 'vivid' : 'standard');
   return {
-    shadow: frost ? SHADOW_FROST : (vivid ? GLOW_VIVID : null),
-    look, mode, light: frost, glass: frost ? GLASS.panel : 1, menuGlass: frost ? GLASS.menu : 1,
-    backdrop: frost ? (vivid ? BACKDROPS.frostVivid : BACKDROPS.frost) : (vivid ? BACKDROPS.vivid : BACKDROPS.standard),
-    overlay: frost ? OVERLAYS.frost : OVERLAYS.dark,
+    shadow: light ? SHADOW_FROST : (vivid ? GLOW_VIVID : null),
+    look, mode, blur: look === 'liquid' ? 'off' : blur, light, glass: mild ? GLASS.mild : info.glass, menuGlass: translucent || mild ? GLASS.menu : 1,
+    backdrop: BACKDROPS[key],
+    overlay: OVERLAYS.dark,
   };
 };
 
 // Default (no cover): flat = black background, white text, grey selection. frost = neutral frosted glass.
-export function defaultTheme(look = 'flat') {
-  if (look === 'frost') { const t = buildTheme([{ c: grey(0.6), w: 1 }], { look: 'frost', mode: 'standard' }); t.fromArt = false; return t; }
+export function defaultTheme(look = 'flat', blur = 'off') {
+  if ((look !== 'flat' || blur !== 'off') && LOOKS.includes(look)) { const t = buildTheme([{ c: grey(0.6), w: 1 }], { look, mode: 'standard', blur }); t.fromArt = false; return t; }
   const panel = BLACK;
   const t = finish({
     bg: fromHex('#0c0c0c'), bg2: fromHex('#000000'), panel, panel2: fromHex('#141414'), border: fromHex('#2a2a2a'),
     fg: WHITE, dimBase: fromHex('#b4b4b4'), accent: fromHex('#d8d8d8'), accent2: fromHex('#9a9a9a'), selBg: fromHex('#3a3a3a'),
-  }, CFG('flat', 'standard'));
+  }, CFG('flat', 'standard', 'off'));
   t.fromArt = false;
   return t;
 }
@@ -284,9 +338,10 @@ function pickShades(palette, n, tune) {
 }
 
 export function buildTheme(palette, opts = {}) {
-  const look = opts.look === 'frost' ? 'frost' : 'flat', mode = opts.mode === 'vivid' ? 'vivid' : 'standard';
-  if (!palette || !palette.length) return defaultTheme(look);
-  const cfg = CFG(look, mode);
+  const look = LOOKS.includes(opts.look) ? opts.look : 'flat', mode = opts.mode === 'vivid' ? 'vivid' : 'standard', blur = BLURS.includes(opts.blur) ? opts.blur : 'off';
+  const light = LOOK_INFO[look].light;
+  if (!palette || !palette.length) return defaultTheme(look, blur);
+  const cfg = CFG(look, mode, blur);
   const dom = palette[0].c, dh = toHsl(dom);
   const anyColour = palette.some((p) => chroma(p.c) > 0.15);
   const chromatic = chroma(dom) > CHROMA_MIN || (mode === 'vivid' && anyColour);
@@ -296,7 +351,7 @@ export function buildTheme(palette, opts = {}) {
   // distinct vivid shades of the cover
   const tuneDark = (c) => { const h = toHsl(c); h.s = Math.min(0.98, Math.max(h.s, mode === 'vivid' ? 0.85 : 0.55)); h.l = mode === 'vivid' ? Math.min(0.76, Math.max(h.l, 0.62)) : Math.min(0.74, Math.max(h.l, 0.58)); return fromHsl(h); };
   const tuneLight = (c) => { const h = toHsl(c); h.s = Math.min(0.95, Math.max(h.s, mode === 'vivid' ? 0.8 : 0.5)); h.l = Math.min(0.5, Math.max(h.l, 0.38)); return fromHsl(h); };
-  const tune = look === 'frost' ? tuneLight : tuneDark;
+  const tune = light ? tuneLight : tuneDark;
   const shades = pickShades(palette, mode === 'vivid' ? 4 : 2, tune);
   const neutralCover = !shades.length || !anyColour;
   const sh = (i) => shades[Math.min(i, shades.length - 1)];
@@ -304,8 +359,8 @@ export function buildTheme(palette, opts = {}) {
 
   const hue1 = chromatic ? H : 0;
   let raw;
-  if (look === 'flat' && mode === 'standard') {
-    // ---- the original look (unchanged)
+  if (!light && mode === 'standard') {
+    // ---- the original dark look (unchanged); the glass / liquid looks use the same colours, only more see-through
     const sat = chromatic ? Math.min(0.62, Math.max(0.22, huePal.s * 0.95)) : 0;
     let h2s = dh.h + 0.04; for (let i = 1; i < palette.length; i++) { const hh = toHsl(palette[i].c); if (chroma(palette[i].c) > 0.15 && hueDist(hh.h, dh.h) > 0.06) { h2s = hh.h; break; } }
     const accentBase = neutralCover ? fromHsl({ h: dh.h, s: 0, l: 0.78 }) : shades[0];
@@ -317,7 +372,7 @@ export function buildTheme(palette, opts = {}) {
       fg: fromHsl({ h: dh.h, s: chromatic ? 0.25 : 0, l: 0.96 }), dimBase: fromHsl({ h: dh.h, s: chromatic ? 0.18 : 0, l: 0.72 }),
       accent: accentBase, accent2: accent2Base, selBg: fromHsl({ h: ah.h, s: colourful ? Math.min(0.55, ah.s) : 0, l: 0.26 }), shades: [accent2Base, accentBase],
     };
-  } else if (look === 'flat') {
+  } else if (!light) {
     // ---- VIVID dark: strong tinted surfaces, glowing borders, bright multi-shade accents
     const s1 = chromatic ? 0.78 : 0;
     const a1 = neutralCover ? fromHsl({ h: 0, s: 0, l: 0.82 }) : sh(0), a2 = neutralCover ? fromHsl({ h: 0, s: 0, l: 0.62 }) : sh(1);
@@ -328,7 +383,7 @@ export function buildTheme(palette, opts = {}) {
       accent: a1, accent2: a2, selBg: fromHsl({ h: toHsl(a1).h, s: chromatic ? 0.72 : 0, l: 0.36 }), shades: neutralCover ? [a2, a1] : shades,
     };
   } else {
-    // ---- FROST (pastel glass): light surfaces, dark text. vivid = candy colours.
+    // ---- PASTEL / FROST (light surfaces, dark text). vivid = candy colours.
     const v = mode === 'vivid', s1 = chromatic ? (v ? 0.82 : Math.min(0.6, Math.max(0.3, huePal.s * 0.8))) : 0;
     const a1 = neutralCover ? fromHsl({ h: 0, s: 0, l: 0.3 }) : sh(0), a2 = neutralCover ? fromHsl({ h: 0, s: 0, l: 0.42 }) : sh(1);
     raw = {
@@ -338,8 +393,30 @@ export function buildTheme(palette, opts = {}) {
       accent: a1, accent2: a2, selBg: fromHsl({ h: toHsl(a1).h, s: chromatic ? (v ? 0.78 : 0.55) : 0, l: 0.62 }), shades: neutralCover ? [a2, a1] : shades,
     };
   }
-  return finish(raw, cfg);
+  // the liquid look draws the fluid; the 'colours' blur draws a soft field of the same colours: in both cases the exact colours go into the contrast check
+  return finish(raw, look === 'liquid' || cfg.blur === 'colours' ? Object.assign({}, cfg, { fluid: fluidPalette(raw.shades) }) : cfg);
 }
+
+// ---------------------------------------------------------------- liquid
+// The fluid's colours come from the album's shades. The brightness is limited by LUMINANCE (not per channel), so saturated album colours stay
+// vivid, and the exact colours drawn are fed into the contrast checks (windowExtremes), so the guarantee is exact, not a loose bound.
+export const FLUID_LUM = 0.17;                                              // about a 45 % grey
+export function capLuminance(c, L = FLUID_LUM) {
+  if (luminance(c) <= L) return c;
+  let lo = 0, hi = 1;
+  for (let i = 0; i < 24; i++) { const m = (lo + hi) / 2; if (luminance({ r: c.r * m, g: c.g * m, b: c.b * m }) > L) hi = m; else lo = m; }
+  return { r: c.r * lo, g: c.g * lo, b: c.b * lo };
+}
+export function fluidPalette(shades, layers = 3) {
+  const src = shades && shades.length ? shades : [grey(0.5)];
+  return Array.from({ length: layers }, (_, i) => {
+    const h = toHsl(src[i % src.length]);
+    const base = fromHsl({ h: h.h, s: Math.min(1, Math.max(h.s, 0.55)), l: 0.5 });          // pull toward a strong colour, the cap then limits the brightness
+    return { top: capLuminance(base), deep: capLuminance(mix(base, BLACK, 0.3 + 0.07 * i)), foam: capLuminance(mix(base, WHITE, 0.35)) };
+  });
+}
+/** colours of the fluid layers (back to front): foam is the lighter line on the surface */
+export function liquidColours(t, layers = 3) { return t.fluid && t.fluid.length ? t.fluid : fluidPalette(t.shades, layers); }
 
 // ---------------------------------------------------------------- verification (used by tests + dev checks)
 export function checkTheme(t) {
@@ -365,6 +442,22 @@ export function checkTheme(t) {
   for (const p of panels) need('selBg(visible)', t.selBg, 'panel', p, 1.8);
   need('selBg(visible)', t.selBg, 'panel2', t.panel2, 1.5);
   need('panel2(visible)', t.panel2, 'panel', t.panel, 1.12);
+  // lyrics (cover overlay + fullscreen): light text on a dark shade in every look
+  if (t.ly) {
+    const lsurf = t.ly.surfaces && t.ly.surfaces.length ? t.ly.surfaces : (t.surfaces || []).filter(([n]) => /^(cover-shade|fullscreen)/.test(n));
+    for (const [sn, sc] of lsurf) { need('ly.fg', t.ly.fg, sn, sc, MIN_TEXT); need('ly.dim', t.ly.dim, sn, sc, MIN_TEXT); need('ly.accent', t.ly.accent, sn, sc, MIN_TEXT); }
+    if (luminance(t.ly.fg) < 0.5) problems.push('ly.fg is not light: ' + luminance(t.ly.fg).toFixed(2));
+    need('ly.onAccent', t.ly.onAccent, 'ly.accent', t.ly.accent, MIN_TEXT);
+  }
+  // visualisers: always a dark screen, light text, glowing graphics (the graphs must never invert)
+  if (t.viz) {
+    const v = t.viz;
+    if (luminance(v.panel) > 0.05) problems.push('viz.panel is not dark: ' + luminance(v.panel).toFixed(3));
+    need('viz.fg', v.fg, 'viz.panel', v.panel, MIN_TEXT); need('viz.dim', v.dim, 'viz.panel', v.panel, MIN_TEXT);
+    need('viz.accent', v.accent, 'viz.panel', v.panel, 3); need('viz.accent2', v.accent2, 'viz.panel', v.panel, 3);
+    for (const [i, c] of (v.shades || []).entries()) need('viz.shade' + i, c, 'viz.panel', v.panel, 3);
+    if (luminance(v.fg) < 0.8 * luminance(v.accent)) problems.push('viz.fg is much darker than viz.accent: the spectrogram ramp would invert');
+  }
   return problems;
 }
 

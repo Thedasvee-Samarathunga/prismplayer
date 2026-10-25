@@ -1,6 +1,6 @@
 # Prism: handoff notes (read this first when continuing the project)
 
-Prism = foobar2000-style music player, Electron (Windows), UI colours follow album art. v1.3.0.
+Prism = foobar2000-style music player, Electron (Windows), UI colours follow album art. v2.0.0.
 Owner prefs: casual upbeat tone; always send COMPLETE files (never snippets); builds via GitHub Actions (no local VS); former developer.
 The owner CANNOT upload zips. To continue: ask them to run the PowerShell bundler (below) in the repo folder and upload the three text files.
 
@@ -31,12 +31,43 @@ Produces prism-core.txt (server, native helper, Electron, workflow), prism-ui.tx
 - Transport row is a grid on the same columns as the panels (`--left-w`/`--right-w` set on #app), so the seek bar spans the queue exactly.
 - Electron: `boot.js` (launch marker / safe mode / gpu flag), `smoke.js` (`--smoke-test`), hardened `main.js`. build.yml runs the unpacked AND silently-installed app on the runner.
 
-## Tests (all passing at 1.3.0)
+## Added in 1.4
+- Looks: `LOOKS = flat | pastel | glass | frost | liquid` in color.js (`LOOK_INFO` says light/dark and how see-through). `buildTheme` now also returns `ly` (lyrics palette: ALWAYS light text on a dark shade, even on the light looks),
+  `viz` (visualiser palette: ALWAYS a dark screen; theme.js sets `--viz-bg`, viz.js merges it over the theme via `vizTheme`) and `fluid` (liquid colours, luminance-capped at FLUID_LUM; their exact colours are inside `windowExtremes`,
+  so the contrast guarantee for the liquid look is exact). `checkTheme` verifies all of it. Light looks no longer have cover-shade surfaces in their main text checks (the lyrics palette has its own).
+- `liquidsim.js` (pure physics + MotionTracker + MouseShake, unit-tested) and `liquid.js` (canvas #liquid in #backdrop, polls window.screenX/Y, pointer shake, devicemotion, background click, bass from the analyser; `window.__prismLiquid` for tests).
+- `winctl.js` + #wincontrols: the app's own window buttons; electron main has NO titleBarOverlay any more (IPC `win-control`, `win-state`). Browsers without `prismHost.windowControl` do not show them.
+- Layout: the visualiser row `#viz` now lives INSIDE `#main` (grid rows `minmax(0,1fr) var(--viz-h)`); `S.layout.sideFull` (class `side-full`) makes `#side` span both rows and shortens `#viz` to columns 1-3.
+- Square corners: `settings.appearance.square` -> `html[data-square=1]` (CSS kills every border-radius) and the visualisers read `f.square`.
+- VU meter rewritten in vizlib.js (`vuPos`, `vuStep` are pure and tested). The "Open containing folder" button under the cover is gone (menus still have it).
+- Tests: `test/looks.test.mjs` (palettes, fluid, physics, detectors, VU), window-button test in electron.test.js, `python test/e2e_v14.py` (real-pixel contrast per look, shaking, layout, square corners).
+- NOT verified: the real Windows window buttons / resizing with `titleBarStyle: 'hidden'` and no overlay (Win11 snap-layout hover on the maximise button is gone), real window-drag shaking in Electron, liquid cost on a weak GPU.
+
+## Tests (all passing at 1.3.0; see 1.4 above for the new ones)
 Also: `test/recap.test.js` (mock Last.fm), `appearance.test.mjs`, `cache.test.js` (slow-ffmpeg wrapper), `hotkeys.test.mjs`, `recapviews.test.mjs`, `electron.test.js` (fake electron),
 `python test/e2e_v13.py`. Contrast in the browser tests is measured on real pixels behind each text run (not on rails/borders).
 `npm test` (unit/integration incl. lyrics), `python test/e2e.py`, `python test/e2e_native.py`, `python test/e2e_features.py`.
 Needs ffmpeg, gcc, Python (Pillow, soundfile, playwright), Node 20+. Fixtures: `test/make_fixtures.py` (incl. invented lyrics), `test/make_gapless.py`.
 All lyric text in tests is invented; LRCLIB is mocked locally.
+
+## Added in 2.0
+- **Cue sheets**: `src/server/cue.js` (pure parser + expander), `library.js` (`_cueTracks`, `_cueFromSheet`, `_resolveCueAudio`; cue tracks are real track records with `cue:true, cueStart, cueEnd, cuePath, parentId`; the whole-file
+  parent is kept but `hidden:true`, `list()` filters hidden). `feeder.js` decoderArgs seeks to `cueStart + startSec` and limits with `-t`. Drag and drop goes through `/api/library/add` (`addPaths` handles `.cue`).
+  Embedded sheets: the `CUESHEET` tag (probe field `cueText`). Cover cache key uses `parentId`.
+- **Crossfade**: `feeder.js` `withCrossfade` wraps `feedRaw` (`feed()` picks it when `opts.crossfade` is given). Off = byte-identical stream. The overlap is capped at 40 % of either track, needs the same sample rate.
+  The server reads `settings.dj.crossfade` live while `settings.dj.on` (`djCrossfade` in index.js; also passed to NativeEngine). FIXED a real leak: `Decoder.kill()` now closes stdout and SIGKILLs (a preloaded decoder nobody reads
+  used to hang for ever on a full pipe).
+- **Last.fm track stats**: recap history v2 has `tracks` (key -> [first, last, count, plainTitle?]); an old v1 history is rebuilt once (old one stays in use meanwhile). `RecapService.trackStats(libraryTracks)` and `/api/recap/trackstats`;
+  client `lfstats.js` (`S.lf`) keeps it fresh; `sideview.js` shows Last.fm numbers (src label) else local. `computeAnalytics` also returns `periods` (per time frame numbers) used by `summaryFacts()` in recapviews.js.
+- **Background blur**: `color.js` `BLURS`, `CFG(look, mode, blur)`; `flat`/`pastel` + blur = see-through (glass .8). 'colours' draws `#field` (radial gradients of the fluid palette; exact colours are in the contrast model like the liquid).
+  theme.js sets `--layer-blur`, `--fl1..3`, `data-blur`. Liquid and Black & white ignore it.
+- **Visualiser row**: `vizlayout.js` (pure) + `viz.js` (dynamic panels, splitters `.vz-split`, per-panel grips `.vz-grip`, row grip `#vz-rowgrip`). Layout fields in `S.layout`: viz, vizW, vizH, vizRow, vizTop. `#viz` lives in `#main`;
+  `#main.viz-top` puts it above. Max 6.
+- **DJ**: `djlogic.js` (pure `buildMix`, seeded) + `dj.js` (ribbon button `.dj-btn`, panel `#djpanel`, playlist named "DJ Mix", top-up on `nowplaying`). Settings: `settings.dj {on, mode, genres, style, crossfade}`.
+- **Icon**: `build/icon.ico` (16-256 px) + `build/icon.png` + `src/ui/icon.svg` + title-bar mark. `app.setAppUserModelId('com.prism.player')`. NOTE: the PowerShell bundler skips .png/.ico (binary); they only travel in update zips.
+- Tests: `cue.test.js`, `mix.test.js`, `lfstats.test.js`, `dj.test.mjs`, `vizlayout.test.mjs` (+ summary tests in recapviews.test.mjs, blur tests in looks.test.mjs, taskbar test in electron.test.js), `python test/e2e_v20.py`.
+- NOT verified: real Windows taskbar rendering of the icon, real cue sheets from real rips (APE / WavPack / multi-FILE sheets with odd names), real Last.fm responses and history sizes (100k+ scrobbles: history file grows by the per-track map),
+  real WASAPI with crossfade, DJ quality with a real library.
 
 ## Test gotcha
 The playlist / library lists are virtual (rows are recycled), so DOM order is NOT row order. Browser tests must find row i with `.pl-row[data-i="i"]`, never `.nth(i)`

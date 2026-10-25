@@ -233,7 +233,7 @@ export function initPlaylistView() {
   // depend on the frame rate, and it grows the further past the edge the pointer is.
   function bandEdge() {
     if (!drag) return;
-    const now = performance.now(), dt = Math.min(80, now - drag.last); drag.last = now;
+    const now = performance.now(), dt = Math.min(300, now - drag.last); drag.last = now;      // a late timer tick (busy page) scrolls by the time that really passed, so the speed stays px per second
     const r = listEl.getBoundingClientRect(), zone = 40;
     let depth = 0, dir = 0;
     if (drag.cy < r.top + zone) { depth = (r.top + zone - drag.cy) / zone; dir = -1; }
