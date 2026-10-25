@@ -8,12 +8,13 @@ import { initViz } from './viz.js';
 import { initLibraryView } from './libview.js';
 import { initPlaylistView, newPlaylist, sortBy, shufflePlaylist } from './plview.js';
 import { initSideView } from './sideview.js';
-import { initTransport, initScrobbleStatus } from './transport.js';
+import { initTransport, initScrobbleStatus, slider } from './transport.js';
+import { initLyrics, toggleLyrics, toggleFullscreen, setFullscreen, isFullscreen } from './lyrics.js';
 import { mountMenuBar } from './menus.js';
 import { toast, settingsDialog, shortcutsDialog, aboutDialog, browseDialog } from './dialogs.js';
 import { eqDialog, applyEq } from './eqdialog.js';
 import { reapplyGain } from './playback.js';
-import { addFilesToPlaylist, rescan } from './actions.js';
+import { addFilesToPlaylist, rescan, revealTrack } from './actions.js';
 import { ORDERS } from './queue.js';
 
 const $ = (id) => document.getElementById(id);
@@ -90,6 +91,8 @@ function menuDefs() {
       { sep: true },
       { label: 'New playlist…', key: 'Ctrl+N', action: newPlaylist },
       { sep: true },
+      { label: 'Open containing folder of the playing song', action: () => { if (P.cur) revealTrack(P.cur.track.id); else toast('Nothing is playing.', { ms: 2000 }); } },
+      { sep: true },
       { label: 'Settings…', key: 'Ctrl+,', action: openSettings },
     ] },
     { label: 'Edit', items: () => [
@@ -103,6 +106,8 @@ function menuDefs() {
       { label: 'Library panel', checked: !S.layout.hideLib, action: () => toggleLayout('hideLib') },
       { label: 'Info panel', checked: !S.layout.hideSide, action: () => toggleLayout('hideSide') },
       { label: 'Visualisers', checked: !S.layout.hideViz, action: () => toggleLayout('hideViz') },
+      { label: 'Lyrics on the cover', key: 'L', checked: !!S.layout.lyrics, action: () => toggleLyrics() },
+      { label: 'Fullscreen lyrics', key: 'F', checked: isFullscreen(), action: () => toggleFullscreen() },
       { sep: true },
       { label: 'Follow playback', checked: S.follow, action: () => { S.follow = !S.follow; persist(); } },
       { label: 'Scroll to playing track', action: () => plView.scrollToPlaying() },
@@ -145,7 +150,11 @@ function initKeys() {
     if (modalOpen) return;
     if (mod && e.key.toLowerCase() === 'n') { e.preventDefault(); newPlaylist(); return; }
     if (mod && e.key === ',') { e.preventDefault(); openSettings(); return; }
+    if (e.key === 'F11') { e.preventDefault(); toggleFullscreen(); return; }
+    if (e.key === 'Escape' && isFullscreen()) { e.preventDefault(); setFullscreen(false); return; }
     if (typing) return;
+    if (!mod && !e.altKey && (e.key === 'l' || e.key === 'L')) { e.preventDefault(); toggleLyrics(); return; }
+    if (!mod && !e.altKey && (e.key === 'f' || e.key === 'F')) { e.preventDefault(); toggleFullscreen(); return; }
     if (e.key === ' ' && !mod) { e.preventDefault(); toggle(); return; }
     if (mod && e.key === 'ArrowRight') { e.preventDefault(); next(false); }
     else if (mod && e.key === 'ArrowLeft') { e.preventDefault(); prev(); }
@@ -175,6 +184,7 @@ async function boot() {
   plView = initPlaylistView();
   initSideView();
   transport = initTransport();
+  initLyrics({ slider });
   initScrobbleStatus();
   initMediaSession();
   initSplitters();

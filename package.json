@@ -1,7 +1,7 @@
 {
   "name": "prism-player",
-  "version": "1.1.0",
-  "description": "Prism: a foobar2000-style music player whose colours follow the album art. Gapless playback, 10-band EQ, ReplayGain, WASAPI exclusive output, Last.fm / ListenBrainz scrobbling.",
+  "version": "1.2.0",
+  "description": "Prism: a foobar2000-style music player whose colours follow the album art. Synced lyrics, gapless playback, 10-band EQ, ReplayGain, WASAPI exclusive output, Last.fm / ListenBrainz scrobbling.",
   "main": "electron/main.js",
   "author": "Prism",
   "license": "MIT",
@@ -9,7 +9,7 @@
   "scripts": {
     "start": "electron .",
     "dev": "node scripts/dev.js",
-    "test": "node --test --test-force-exit test/server.test.js test/color.test.mjs test/logic.test.mjs test/dsp.test.mjs test/folders.test.js test/audio.test.js",
+    "test": "node --test --test-force-exit test/server.test.js test/color.test.mjs test/logic.test.mjs test/dsp.test.mjs test/folders.test.js test/audio.test.js test/lyrics.test.js test/lyrics-ui.test.mjs",
     "dist": "electron-builder --win nsis portable --x64 --publish never"
   },
   "devDependencies": {

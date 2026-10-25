@@ -6,7 +6,7 @@ import { VList } from './vlist.js';
 import { escapeHtml } from './fmt.js';
 import { ICON } from './icons.js';
 import { openMenu } from './menus.js';
-import { playTracks, playSingle, enqueue, enqueueNew } from './actions.js';
+import { playTracks, playSingle, enqueue, enqueueNew, revealTrack } from './actions.js';
 
 let rows = [], tree = [], selKey = null, vl;
 let filterTimer = 0;
@@ -74,7 +74,8 @@ function contextMenu(e, i) {
     { label: 'Play', action: () => activate(i) },
     { label: 'Add to current playlist', action: () => enqueue(r.ids) },
     { label: 'Add to new playlist', action: () => enqueueNew(r.ids, label.slice(0, 40)) },
-    ...(r.expandable ? [{ sep: true }, { label: r.expanded ? 'Collapse' : 'Expand', action: () => toggle(i) }] : []),
+    ...(r.ids.length ? [{ sep: true }, { label: 'Open containing folder', action: () => revealTrack(r.ids[0]) }] : []),
+    ...(r.expandable ? [{ label: r.expanded ? 'Collapse' : 'Expand', action: () => toggle(i) }] : []),
   ], e.clientX, e.clientY);
 }
 

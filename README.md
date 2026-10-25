@@ -21,6 +21,14 @@ A foobar2000-style music player whose whole interface takes its colours from the
   With no cover art (or with the option switched off) the UI is black, white and grey.
 * **Layout:** library tree (artist/album, album, artist, genre, year) with filter · playlist tabs · info panel with cover + tags + play statistics ·
   spectrum, oscilloscope, spectrogram and level meters · foobar-style status line (`FLAC | 904 kbps | 44100 Hz | stereo`) plus the active output.
+* **Lyrics:** synced lyrics highlighted line by line (click a line to jump there). Sources, best first: a `.lrc` file next to the song, lyrics in the
+  tags, **LRCLIB** (free open library, optional), an OpenLyrics `.xml` or `.txt` file. The *Lyrics* button blurs the cover and plays the lyrics over it;
+  *Fullscreen* (key `F` / `F11`) shows the slightly blurred art with big synced lyrics. Online lookups only happen while a lyrics view is open, once per
+  song (answers and misses are remembered), and can be switched off in Settings › Lyrics. Text contrast over the blurred art is checked on real pixels.
+* **Open containing folder** for any song (playlist, library, info panel, File menu); if the file is missing it opens the nearest folder.
+* **Drag to highlight** in the playlist (rubber band, Ctrl adds, auto-scrolls). Dragging an already highlighted row still moves the group.
+* **12 visualisers**, any panel can be swapped by right-clicking it (spectrum, LED, mirrored, curve, circular, oscilloscope, stereo phase scope,
+  spectrogram, level meters, VU needles, level history, bass ripples). The choice is remembered.
 * **Scrobbling:** Last.fm and ListenBrainz, with a persistent offline queue (nothing is lost when you are offline).
   A track counts after half its length or 4 minutes, whichever is first; tracks under 30 s are skipped.
 * Play counts / first and last played, drag & drop, shuffle / repeat, stop-after-current, media keys, resume on start.
@@ -54,6 +62,7 @@ opens the player in your browser (Edge opens it as an app window). Data is kept 
     npm test                              # server, gapless (bit-exact), native helper, EQ, ReplayGain, folders, colour engine, queue/tree logic
     python test/e2e.py                    # the real UI in headless Chromium: plays every fixture format, gapless hand-over, EQ, ReplayGain, settings
     python test/e2e_native.py             # the WASAPI path end to end (the helper is built with a test sink on Linux)
+    python test/e2e_features.py           # lyrics, fullscreen, open folder, drag-highlight, swappable visualisers (LRCLIB is mocked)
 
 ## What is and is not verified
 
@@ -66,7 +75,8 @@ to the browser output.
 
 * No ASIO, no native DSD / DoP output, no DSP chain beyond the EQ, no crossfade. Multi-channel files are down-mixed to stereo.
 * A change to the playlist or play order made in the last ~10 seconds of a track takes effect from the following track (the next track is already queued).
-* Tags are read-only. Cue sheets and internet radio are not supported.
+* Tags are read-only. Cue sheets and internet radio are not supported. Embedded *synchronised* ID3 lyrics (SYLT) are not read (ffmpeg does not expose them); use LRC text in the LYRICS tag or a `.lrc` file.
+* Lyrics timing cannot be nudged per song yet (the LRC `[offset:]` tag is honoured).
 
 ## Credits
 

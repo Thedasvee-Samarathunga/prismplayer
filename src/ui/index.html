@@ -28,6 +28,8 @@
     </div>
     <div id="time">0:00 / 0:00</div>
     <button id="b-order" class="icon-btn wide" title="Playback order"></button>
+    <button id="b-lyrics" class="icon-btn" title="Lyrics (L)" aria-label="Lyrics" aria-pressed="false"></button>
+    <button id="b-full" class="icon-btn" title="Fullscreen lyrics (F)" aria-label="Fullscreen"></button>
     <div id="vol">
       <button id="b-mute" class="icon-btn" aria-label="Mute"></button>
       <div id="vol-slider" role="slider" tabindex="0" aria-label="Volume" aria-valuemin="0" aria-valuemax="100"><div class="seek-track"><div class="seek-fill"></div><div class="seek-thumb"></div></div></div>
@@ -57,22 +59,36 @@
 
     <div class="splitter" id="split-right" role="separator" aria-orientation="vertical"></div>
     <aside id="side" class="panel">
-      <div id="cover-wrap"><img id="cover" alt="" draggable="false"><div id="cover-ph"></div></div>
-      <div id="np-meta"><div id="np-title"></div><div id="np-artist"></div><div id="np-album"></div></div>
+      <div id="cover-wrap"><img id="cover" alt="" draggable="false"><div id="cover-ph"></div><div id="cover-shade"></div><div id="cover-lyrics"></div><button id="cover-lyr-btn" class="pill-btn" type="button" title="Show lyrics on the cover (L)" aria-pressed="false"></button></div>
+      <div id="np-meta"><div id="np-title"></div><div id="np-artist"></div><div id="np-album"></div><button id="np-folder" class="pill-btn static" type="button" title="Open the folder that contains this song" hidden></button></div>
       <div id="props"></div>
     </aside>
   </main>
 
-  <section id="viz">
-    <div class="panel vz"><canvas id="v-spec"></canvas></div>
-    <div class="panel vz"><canvas id="v-scope"></canvas></div>
-    <div class="panel vz"><canvas id="v-gram"></canvas></div>
-    <div class="panel vz"><canvas id="v-meter"></canvas></div>
+  <section id="viz" aria-label="Visualisers (right-click a panel to change it)">
+    <div class="panel vz"><canvas></canvas></div>
+    <div class="panel vz"><canvas></canvas></div>
+    <div class="panel vz"><canvas></canvas></div>
+    <div class="panel vz"><canvas></canvas></div>
   </section>
 
   <footer id="status">
     <span id="st-tech"></span><span id="st-out"></span><span id="st-pos"></span><span id="st-scrobble"></span><span id="st-lib"></span>
   </footer>
+</div>
+<div id="fs" hidden>
+  <div class="fs-bg"></div><div class="fs-scrim"></div>
+  <div class="fs-top">
+    <img id="fs-cover" alt="" draggable="false">
+    <div class="fs-meta"><div id="fs-title"></div><div id="fs-artist"></div><div id="fs-album"></div></div>
+    <button id="fs-close" class="icon-btn" type="button" title="Exit fullscreen (Esc)" aria-label="Exit fullscreen"></button>
+  </div>
+  <div id="fs-lyrics"></div>
+  <div class="fs-bottom">
+    <div class="btn-group"><button id="fs-prev" class="icon-btn" type="button" aria-label="Previous"></button><button id="fs-play" class="icon-btn primary" type="button" aria-label="Play / pause"></button><button id="fs-next" class="icon-btn" type="button" aria-label="Next"></button></div>
+    <span id="fs-time">0:00 / 0:00</span>
+    <div id="fs-seek" role="slider" tabindex="0" aria-label="Seek"><div class="seek-track"><div class="seek-fill"></div><div class="seek-thumb"></div></div></div>
+  </div>
 </div>
 <div id="overlay"></div>
 <script type="module" src="/js/main.js"></script>

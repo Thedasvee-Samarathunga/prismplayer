@@ -10,7 +10,7 @@ import { api } from './api.js';
 
 const $ = (id) => document.getElementById(id);
 
-function slider(el, { onMove, onEnd, onKey }) {
+export function slider(el, { onMove, onEnd, onKey }) {
   const track = el.querySelector('.seek-track');
   const frac = (e) => { const r = track.getBoundingClientRect(); return Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)); };
   el.addEventListener('pointerdown', (e) => {

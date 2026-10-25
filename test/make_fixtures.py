@@ -85,6 +85,13 @@ d, m = alb("Long Distance", "Marathon", 2022, "Test")
 cover(os.path.join(d, "cover.jpg"), (200, 140, 20), (250, 220, 90))
 tone(os.path.join(d, "01 Endurance.mp3"), 350, secs=40, extra=["-c:a", "libmp3lame", "-b:a", "96k"], meta={**m, "title": "Endurance", "track": "1/1"})
 
+# lyrics fixtures (invented lines): synced .lrc beside the 40 s track, embedded plain lyrics in one Vorbis file
+with open(os.path.join(d, "01 Endurance.lrc"), "w", encoding="utf-8") as f:
+    f.write("[ti:Endurance]\n[ar:Long Distance]\n" + "".join(f"[00:{4*i:02d}.00]Lantern line number {i}\n" for i in range(1, 9)))
+tide = os.path.join(root, "Blue Harbor", "Deep Water", "01 Tide.ogg")
+subprocess.run(["ffmpeg", "-y", "-v", "error", "-i", tide, "-c", "copy", "-metadata", "LYRICS=Harbour lamps burn low\nSalt wind in the rigging\n\nNobody left on the pier", tide + ".tmp.ogg"], check=True)
+os.replace(tide + ".tmp.ogg", tide)
+
 # ---- DSD (DSF) from a real sigma-delta modulator ----
 d, m = alb("Sigma Delta", "One Bit", 2020, "Test")
 cover(os.path.join(d, "cover.jpg"), (90, 40, 140), (230, 120, 220))

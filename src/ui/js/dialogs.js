@@ -174,7 +174,7 @@ export function settingsDialog({ onFoldersChanged } = {}) {
   tabsHost.className = 'tabs-inline';
   const pane = document.createElement('div');
   wrap.append(tabsHost, pane);
-  const TABS = ['Library', 'Output', 'Playback', 'Scrobbling'];
+  const TABS = ['Library', 'Output', 'Playback', 'Lyrics', 'Scrobbling'];
   let tab = 'Library', pollTimer = 0;
 
   const mod = modal({ title: 'Settings', body: wrap, width: '700px', buttons: [{ label: 'Close', primary: true }], onClose: () => clearInterval(pollTimer) });
@@ -197,6 +197,7 @@ export function settingsDialog({ onFoldersChanged } = {}) {
     clearInterval(pollTimer);
     if (tab === 'Library') return libraryPane();
     if (tab === 'Output') return outputPane();
+    if (tab === 'Lyrics') return lyricsPane();
     if (tab === 'Scrobbling') return scrobblePane();
     return playbackPane();
   }
@@ -295,6 +296,24 @@ export function settingsDialog({ onFoldersChanged } = {}) {
     vis();
     const info = () => { const el = q('#o-info'); if (el) el.textContent = engine.info().label ? 'Now: ' + engine.info().label : ''; };
     info(); pollTimer = setInterval(info, 1500);
+  }
+
+  // ---- lyrics
+  function lyricsPane() {
+    const l = S.settings.lyrics || {};
+    pane.innerHTML = `
+      <p class="note">Lyrics are shown on the cover (the <b>Lyrics</b> button, key <b>L</b>) and in fullscreen (key <b>F</b>). Prism looks for them in this order:</p>
+      <ol class="note" style="margin:6px 0 6px 18px;padding:0;line-height:1.7">
+        <li>a <b>.lrc</b> file next to the song with the same name (synced)</li>
+        <li>lyrics stored in the song's tags (synced if they carry timestamps)</li>
+        <li><b>LRCLIB</b>, a free open lyrics library (synced when it has them)</li>
+        <li>an <b>OpenLyrics</b> <b>.xml</b> or a <b>.txt</b> file next to the song (not synced)</li>
+      </ol>
+      <label class="check" style="margin-top:12px"><input type="checkbox" id="ly-online"> Look up missing or unsynced lyrics on LRCLIB</label>
+      <p class="note">This sends the song's <b>artist, title, album and length</b> to lrclib.net, only while a lyrics view is open and only once per song (answers are remembered, including "not found"). Turn it off to keep everything on this PC.</p>
+      <p class="note">Synced lyrics highlight the current line and scroll with the music; click a line to jump there. Your music files are never changed.</p>`;
+    const cb = pane.querySelector('#ly-online'); cb.checked = l.online !== false;
+    cb.addEventListener('change', () => saveSettings({ lyrics: { online: cb.checked } }));
   }
 
   // ---- scrobbling
@@ -415,7 +434,9 @@ export function shortcutsDialog() {
     ['Space', 'Play / pause'], ['Ctrl + → / ←', 'Next / previous track'], ['Shift + → / ←', 'Seek +5 s / −5 s'],
     ['Ctrl + ↑ / ↓', 'Volume up / down'], ['Enter', 'Play the selected item'], ['Delete', 'Remove selected tracks from the playlist'],
     ['Ctrl + A', 'Select all tracks in the list'], ['Ctrl + F', 'Focus the library filter'], ['Ctrl + N', 'New playlist'],
+    ['L', 'Show / hide lyrics on the cover'], ['F  or  F11', 'Fullscreen lyrics (Esc to leave)'],
     ['Ctrl + , ', 'Settings'], ['Media keys', 'Play / pause / next / previous'],
+    ['Drag over tracks', 'Highlight a range in the playlist'], ['Right-click a visualiser', 'Swap it for another one'],
   ];
   modal({ title: 'Keyboard shortcuts', body: `<table class="shortcuts">${rows.map(([k, d]) => `<tr><td>${escapeHtml(k)}</td><td>${escapeHtml(d)}</td></tr>`).join('')}</table>` });
 }

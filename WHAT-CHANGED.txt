@@ -1,0 +1,2 @@
+Prism 1.2.0 update. Copy the contents of this folder over your repo (same paths) and commit.
+New: synced lyrics, fullscreen, open containing folder, drag-to-highlight, 12 swappable visualisers.

@@ -2,6 +2,8 @@
 import { api } from './api.js';
 import { S, on } from './state.js';
 import { P } from './playback.js';
+import { ICON } from './icons.js';
+import { revealTrack } from './actions.js';
 import { fmtTime, fmtDate, fmtSize, fmtRate, fmtBits, escapeHtml, displayArtist } from './fmt.js';
 
 let shown = null; // track currently shown
@@ -41,6 +43,8 @@ function show(t) {
   const cover = document.getElementById('cover');
   const title = document.getElementById('np-title'), artist = document.getElementById('np-artist'), album = document.getElementById('np-album');
   const props = document.getElementById('props');
+  const fb = document.getElementById('np-folder');
+  fb.hidden = !t;
   if (!t) {
     cover.classList.remove('on'); cover.removeAttribute('src');
     title.textContent = ''; artist.textContent = ''; album.textContent = ''; props.innerHTML = '';
@@ -59,6 +63,9 @@ function show(t) {
 }
 
 export function initSideView() {
+  const fb = document.getElementById('np-folder');
+  fb.innerHTML = `${ICON.openFolder}<span>Open containing folder</span>`;
+  fb.addEventListener('click', () => { if (shown) revealTrack(shown.id); });
   on('nowplaying', ({ track }) => show(track));
   on('stats', ({ id }) => { if (shown && shown.id === id) show(shown); });
   on('library', () => { if (shown && S.tracks.has(shown.id)) show(S.tracks.get(shown.id)); });

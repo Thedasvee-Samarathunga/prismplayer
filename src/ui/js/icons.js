@@ -15,6 +15,10 @@ export const ICON = {
   caret: svg('<path d="M8 5.5v13l10-6.5z"/>'),
   folder: svg('<path d="M3 7a2 2 0 0 1 2-2h4l2 2.2h8a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>'),
   file: svg('<path d="M9 17.5V6.2l9-1.7v11.3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><circle cx="7" cy="17.5" r="2.2"/><circle cx="16" cy="15.8" r="2.2"/>'),
+  lyrics: svg('<path d="M3.5 7h9M3.5 12h6M3.5 17h9" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M18 5.5v9.2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="15.9" cy="16.4" r="2.3"/>'),
+  fullscreen: svg('<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>'),
+  fullscreenExit: svg('<path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>'),
+  openFolder: svg('<path d="M3 7a2 2 0 0 1 2-2h4l2 2.2h8a2 2 0 0 1 2 2V10H3z" opacity=".55"/><path d="M2.6 11.2A1.4 1.4 0 0 1 4 10h16.6a1.4 1.4 0 0 1 1.35 1.78l-1.9 6.3A2 2 0 0 1 18.1 19.5H5a2 2 0 0 1-2-1.6z"/>'),
   up: svg('<path d="M12 19V6M6 11.5 12 5.5l6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>'),
 };
 export const ORDER_ICON = { default: ICON.order, 'repeat-playlist': ICON.repeat, 'repeat-track': ICON.repeat1, shuffle: ICON.shuffle };

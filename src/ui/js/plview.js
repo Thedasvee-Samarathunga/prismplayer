@@ -8,7 +8,7 @@ import { fmtTime, escapeHtml, displayArtist } from './fmt.js';
 import { ICON } from './icons.js';
 import { openMenu } from './menus.js';
 import { promptText, confirmBox } from './dialogs.js';
-import { enqueueNew, addPathsToPlaylist } from './actions.js';
+import { enqueueNew, addPathsToPlaylist, revealTrack } from './actions.js';
 
 let vl, items = [];
 let sel = new Set();     // selected entry ids (item.u)
@@ -27,7 +27,7 @@ function render(node, i) {
   const showEq = playing && P.state !== 'stopped';
   node.className = `vl-row pl-row${sel.has(it.u) ? ' sel' : ''}${playing ? ' playing' : ''}`;
   node.dataset.i = i;
-  node.draggable = true;
+  node.draggable = sel.has(it.u);          // selected rows are dragged to move them; dragging an unselected row highlights instead
   // only rebuild the content when something visible changed (keeps double-click working)
   const sig = `${it.u}|${i}|${items.length}|${showEq ? 1 : 0}|${t.title}|${t.artist}|${t.albumArtist}|${t.album}|${t.duration}`;
   if (node._sig === sig) return;
@@ -101,7 +101,6 @@ function removeSelected() {
 
 function playIndexAt(i) { const it = items[i]; if (it) playItem(S.activeId, it.u); }
 
-function showInFolder(t) { if (window.prismHost && window.prismHost.showItemInFolder) window.prismHost.showItemInFolder(t.path); }
 
 function contextMenu(e, i) {
   e.preventDefault();
@@ -114,7 +113,8 @@ function contextMenu(e, i) {
     { label: 'Remove', key: 'Del', action: removeSelected },
     { label: 'Add to new playlist', action: () => enqueueNew(ids, 'Selection') },
     ...(S.playlists.length > 1 ? [{ label: 'Copy to playlist', submenu: S.playlists.filter((p) => p.id !== S.activeId).map((p) => ({ label: p.name, action: () => addToPlaylist(p.id, ids) })) }] : []),
-    ...(window.prismHost && window.prismHost.showItemInFolder ? [{ sep: true }, { label: 'Show in folder', action: () => showInFolder(track(items[i])) }] : []),
+    { sep: true },
+    { label: 'Open containing folder', action: () => revealTrack(items[i].id) },
   ], e.clientX, e.clientY);
 }
 
@@ -171,7 +171,7 @@ export function initPlaylistView() {
   dropLine.style.cssText = 'position:absolute;left:6px;right:6px;height:2px;background:var(--accent);border-radius:2px;pointer-events:none;display:none;z-index:2';
   listEl.appendChild(dropLine);
 
-  listEl.addEventListener('click', (e) => { const n = e.target.closest('.pl-row'); if (n) clickRow(+n.dataset.i, e); else if (e.target === listEl || e.target === vl.spacer) { sel = new Set(); refreshRows(); } });
+  listEl.addEventListener('click', (e) => { if (suppressClick) { suppressClick = false; return; } const n = e.target.closest('.pl-row'); if (n) clickRow(+n.dataset.i, e); else if (e.target === listEl || e.target === vl.spacer) { sel = new Set(); refreshRows(); } });
   listEl.addEventListener('dblclick', (e) => { const n = e.target.closest('.pl-row'); if (n) playIndexAt(+n.dataset.i); });
   listEl.addEventListener('contextmenu', (e) => { const n = e.target.closest('.pl-row'); if (n) contextMenu(e, +n.dataset.i); });
 
@@ -198,7 +198,76 @@ export function initPlaylistView() {
     else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') { e.preventDefault(); sel = new Set(items.map((i) => i.u)); refreshRows(); }
   });
 
-  // ---- drag & drop
+
+  // ---- drag to highlight (rubber band). Dragging selected rows moves them (native drag & drop below);
+  //      dragging from an unselected row or from empty space highlights every row the band touches.
+  const band = document.createElement('div');
+  band.className = 'marquee'; band.hidden = true;
+  listEl.appendChild(band);
+  let drag = null, suppressClick = false;
+  const contentY = (clientY) => { const r = listEl.getBoundingClientRect(); return Math.max(0, Math.min(items.length * vl.rowH + 8, clientY - r.top + listEl.scrollTop)); };
+  const contentX = (clientX) => { const r = listEl.getBoundingClientRect(); return Math.max(0, Math.min(listEl.clientWidth, clientX - r.left)); };
+  function applyBand() {
+    const y0 = Math.min(drag.y0, drag.y1), y1 = Math.max(drag.y0, drag.y1);
+    const total = items.length * vl.rowH;
+    const next = new Set(drag.base);
+    let first = -1, last = -1;
+    if (items.length && y0 < total) {
+      first = Math.floor(y0 / vl.rowH); last = Math.min(items.length - 1, Math.floor(y1 / vl.rowH));
+      for (let k = first; k <= last; k++) next.add(items[k].u);
+    }
+    sel = next;
+    if (first >= 0) { anchor = drag.y0 <= drag.y1 ? first : last; focus = drag.y0 <= drag.y1 ? last : first; }
+    band.style.left = Math.min(drag.x0, drag.x1) + 'px'; band.style.width = Math.abs(drag.x1 - drag.x0) + 'px';
+    band.style.top = y0 + 'px'; band.style.height = Math.max(1, y1 - y0) + 'px';
+    vl.refresh(); updateFoot();
+  }
+  function bandMove(e) {
+    drag.cx = e.clientX; drag.cy = e.clientY;
+    if (!drag.moved && Math.hypot(e.clientX - drag.sx, e.clientY - drag.sy) < 4) return;       // a plain click is still a click
+    if (!drag.moved) { drag.moved = true; band.hidden = false; listEl.classList.add('banding'); }
+    drag.x1 = contentX(e.clientX); drag.y1 = contentY(e.clientY);
+    applyBand();
+  }
+  // Auto-scroll while the pointer is near or beyond the top / bottom edge. Time based (px per second), so the speed does not
+  // depend on the frame rate, and it grows the further past the edge the pointer is.
+  function bandEdge() {
+    if (!drag) return;
+    const now = performance.now(), dt = Math.min(80, now - drag.last); drag.last = now;
+    const r = listEl.getBoundingClientRect(), zone = 40;
+    let depth = 0, dir = 0;
+    if (drag.cy < r.top + zone) { depth = (r.top + zone - drag.cy) / zone; dir = -1; }
+    else if (drag.cy > r.bottom - zone) { depth = (drag.cy - (r.bottom - zone)) / zone; dir = 1; }
+    if (drag.moved && dir) {
+      const speed = 300 + Math.min(depth, 3) * 650;           // 300 .. 2250 px/s
+      const before = listEl.scrollTop;
+      listEl.scrollTop += dir * speed * dt / 1000;
+      if (listEl.scrollTop !== before) { drag.y1 = contentY(drag.cy); applyBand(); }
+    }
+  }
+  function bandEnd() {
+    if (!drag) return;
+    document.removeEventListener('mousemove', bandMove, true); document.removeEventListener('mouseup', bandEnd, true);
+    clearInterval(drag.timer);
+    const moved = drag.moved;
+    band.hidden = true; listEl.classList.remove('banding'); drag = null;
+    if (moved) { suppressClick = true; setTimeout(() => { suppressClick = false; }, 0); refreshRows(); }
+  }
+  listEl.addEventListener('mousedown', (e) => {
+    if (e.button !== 0 || e.shiftKey) return;
+    const r = listEl.getBoundingClientRect();
+    if (e.clientX > r.left + listEl.clientWidth) return;                       // scrollbar
+    const n = e.target.closest('.pl-row');
+    const additive = e.ctrlKey || e.metaKey;
+    if (n && !additive && sel.has(items[+n.dataset.i].u)) return;               // a selected row: let the native drag move the selection
+    e.preventDefault(); listEl.focus();                                        // also stops the browser from starting a text/row drag
+    drag = { sx: e.clientX, sy: e.clientY, cx: e.clientX, cy: e.clientY, x0: contentX(e.clientX), y0: contentY(e.clientY), x1: 0, y1: 0, moved: false, base: additive ? new Set(sel) : new Set(), timer: 0, last: performance.now() };
+    drag.x1 = drag.x0; drag.y1 = drag.y0;
+    document.addEventListener('mousemove', bandMove, true); document.addEventListener('mouseup', bandEnd, true);
+    drag.timer = setInterval(bandEdge, 16);
+  });
+
+  // ---- drag & drop (moving selected rows, adding albums from the library, dropping files)
   let dragU = null;
   const dropIndex = (e) => { const i = Math.round((e.clientY - listEl.getBoundingClientRect().top + listEl.scrollTop) / vl.rowH); return Math.max(0, Math.min(items.length, i)); };
   listEl.addEventListener('dragstart', (e) => {

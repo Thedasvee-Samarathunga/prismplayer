@@ -6,6 +6,9 @@ contextBridge.exposeInMainWorld('prismHost', {
   isElectron: true,
   setTitleBar: (bg, fg) => ipcRenderer.send('titlebar', bg, fg),
   showItemInFolder: (p) => ipcRenderer.send('show-in-folder', p),
+  // real window fullscreen (the UI also draws its own fullscreen lyrics screen)
+  setFullscreen: (on) => ipcRenderer.send('fullscreen', !!on),
+  onFullscreen: (cb) => ipcRenderer.on('fullscreen', (_e, v) => cb(!!v)),
   // dropped files -> real file system paths
   pathsFromDrop: (files) => Array.from(files).map((f) => webUtils.getPathForFile(f)).filter(Boolean),
 });

@@ -12,6 +12,8 @@ const { Library, normalizeFolders } = require('./library');
 const { feed } = require('./feeder');
 const { NativeEngine } = require('./native');
 const { Scrobbler } = require('./scrobbler');
+const { LyricsService } = require('./lyrics');
+const { spawn } = require('child_process');
 const { JsonStore } = require('./store');
 
 const DEFAULT_SETTINGS = {
@@ -22,6 +24,7 @@ const DEFAULT_SETTINGS = {
   rg: { preamp: 0, fallback: 0, preventClipping: true },
   output: { mode: 'web', webDeviceId: '', deviceId: '', matchRate: true, bits: 0, bufferMs: 0 },   // mode: web | exclusive | shared
   eq: { enabled: false, preamp: 0, gains: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], preset: 'Flat', autoPreamp: true },
+  lyrics: { online: true },    // look up missing / unsynced lyrics on LRCLIB (sends artist, title, album, length)
   scrobble: {
     lastfm: { enabled: false, apiKey: '', secret: '', sessionKey: '', user: '' },
     listenbrainz: { enabled: false, token: '', user: '' },
@@ -109,6 +112,7 @@ async function startServer(opts) {
     if (rescan) library.scan(st.folders).catch((e) => console.error('[scan]', e));
   }
   const scrobbler = new Scrobbler({ dataDir, getSettings, saveSettings, lastfmRoot: opts.lastfmRoot, lbRoot: opts.lbRoot });
+  const lyrics = new LyricsService({ dataDir, getSettings, lrclibRoot: opts.lrclibRoot });
   const native = new NativeEngine({ library, bin: opts.audioHelper });
   const sseClients = new Set();
   native.on('event', (ev) => { const line = `data: ${JSON.stringify(ev)}\n\n`; for (const r of sseClients) r.write(line); });
@@ -261,6 +265,35 @@ async function startServer(opts) {
     res.end(hit.buf);
   }
 
+  // --------------------------------------------------------------------------- open containing folder
+  // Only ever acts on a track that is in the library (the request carries an id, never a path).
+  // If the file itself is gone (unplugged drive...) the nearest existing parent folder is opened instead.
+  function nearestExisting(p) {
+    let d = path.dirname(p);
+    for (let i = 0; i < 12; i++) {
+      try { if (fs.statSync(d).isDirectory()) return d; } catch (_) { /* keep climbing */ }
+      const up = path.dirname(d);
+      if (up === d) break;
+      d = up;
+    }
+    return null;
+  }
+  function defaultReveal(file, isDir) {
+    const run = (cmd, args, o) => { const c = spawn(cmd, args, Object.assign({ stdio: 'ignore', detached: true, windowsHide: false }, o)); c.on('error', () => {}); c.unref(); };
+    if (process.platform === 'win32') {
+      if (isDir) run('explorer.exe', [file]);
+      else run('explorer.exe', [`/select,"${file}"`], { windowsVerbatimArguments: true });   // explorer needs the path quoted inside one argument
+    } else if (process.platform === 'darwin') run('open', isDir ? [file] : ['-R', file]);
+    else run('xdg-open', [isDir ? file : path.dirname(file)]);
+  }
+  const reveal = opts.reveal || defaultReveal;
+  function revealTrack(t) {
+    if (fs.existsSync(t.path)) { reveal(t.path, false); return { ok: true, path: t.path, folder: path.dirname(t.path) }; }
+    const d = nearestExisting(t.path);
+    if (d) { reveal(d, true); return { ok: true, path: d, folder: d, fallback: true }; }
+    return { ok: false };
+  }
+
   // --------------------------------------------------------------------------- folder browser
   async function browse(p) {
     const isWin = process.platform === 'win32';
@@ -339,6 +372,18 @@ async function startServer(opts) {
         const b = await readBody(req);
         if (!library.get(b.id)) return sendErr(res, 404, 'unknown track');
         return sendJson(res, library.recordPlay(b.id, b.at));
+      }
+      case '/api/lyrics': {
+        const t = trackOr404(); if (!t) return;
+        return sendJson(res, await lyrics.get(t, { refresh: q.get('refresh') === '1' }));
+      }
+      case '/api/reveal': {
+        if (req.method !== 'POST') return sendErr(res, 405, 'POST only');
+        const b = await readBody(req);
+        const t = library.get(b.id); if (!t) return sendErr(res, 404, 'unknown track');
+        const r = revealTrack(t);
+        if (!r.ok) return sendErr(res, 404, 'That folder is not available (is the drive plugged in?)');
+        return sendJson(res, r);
       }
       case '/api/stream': return serveStream(req, res, q);
       case '/api/stream/next': {
@@ -443,14 +488,15 @@ async function startServer(opts) {
   if (opts.autoScan !== false) applyFolders(true); else library.watch(getSettings().folders, Object.assign({ enabled: false }, watchOpts));
 
   return {
-    port, url: baseUrl, library, scrobbler, native, settings: { get: getSettings, save: saveSettings },
-    flushSync() { scrobbler.queue.saveNow(); library.flush(); stateStore.saveNow(); settingsStore.saveNow(); },
+    port, url: baseUrl, library, scrobbler, native, lyrics, settings: { get: getSettings, save: saveSettings },
+    flushSync() { scrobbler.queue.saveNow(); lyrics.flush(); library.flush(); stateStore.saveNow(); settingsStore.saveNow(); },
     async close() {
       library.unwatch();
       for (const r of sseClients) { try { r.end(); } catch (_) { /* ignore */ } }
       for (const x of streams.values()) x.close();
       await native.close().catch(() => {});
       scrobbler.close();
+      lyrics.flush();
       library.flush();
       stateStore.saveNow();
       settingsStore.saveNow();

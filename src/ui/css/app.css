@@ -59,14 +59,14 @@ button { cursor: pointer; }
 #np-line-title { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #np-line-artist { color: var(--accent); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 11.5px; }
 
-#seek, #vol-slider { position: relative; height: 22px; display: flex; align-items: center; cursor: pointer; touch-action: none; }
+#seek, #vol-slider, #fs-seek { position: relative; height: 22px; display: flex; align-items: center; cursor: pointer; touch-action: none; }
 #seek { flex: 1 1 auto; min-width: 120px; }
 #vol-slider { width: 96px; }
 .seek-track { position: relative; width: 100%; height: 5px; border-radius: 3px; background: color-mix(in srgb, var(--fg) 18%, transparent); }
 .seek-buf { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 3px; background: color-mix(in srgb, var(--fg) 14%, transparent); width: 0; }
 .seek-fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 3px; background: linear-gradient(90deg, var(--accent2), var(--accent)); width: 0; }
 .seek-thumb { position: absolute; top: 50%; width: 13px; height: 13px; margin: -6.5px 0 0 -6.5px; border-radius: 50%; background: var(--fg); left: 0; box-shadow: 0 1px 4px rgba(0, 0, 0, .5); transform: scale(0); transition: transform .12s; }
-#seek:hover .seek-thumb, #seek:focus-visible .seek-thumb, #vol-slider:hover .seek-thumb, .dragging .seek-thumb { transform: scale(1); }
+#seek:hover .seek-thumb, #seek:focus-visible .seek-thumb, #fs-seek:hover .seek-thumb, #fs-seek:focus-visible .seek-thumb, #vol-slider:hover .seek-thumb, .dragging .seek-thumb { transform: scale(1); }
 #time { font-variant-numeric: tabular-nums; color: var(--dim); white-space: nowrap; min-width: 92px; }
 #vol { display: flex; align-items: center; gap: 4px; }
 
@@ -167,8 +167,9 @@ select option { background: var(--panel); color: var(--fg); }
 .prop-table tr.sect th { color: var(--dim); font-weight: 700; padding-top: 14px; border-top: 0; text-transform: none; }
 
 /* ------------------------------------------------------------------ visualisers */
-#viz { display: grid; grid-template-columns: 1.7fr 1.1fr 1.5fr .8fr; gap: 8px; padding: 0 10px 8px; min-height: 0; }
-.vz { position: relative; }
+#viz { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; padding: 0 10px 8px; min-height: 0; }
+.vz { position: relative; cursor: context-menu; }
+.vz:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }
 .vz canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 #main.no-viz ~ #viz { display: none; }
 #app.no-viz { grid-template-rows: 36px 58px minmax(0, 1fr) 0 26px; }
@@ -251,3 +252,65 @@ select option { background: var(--panel); color: var(--fg); }
 .eq-f { color: var(--accent); font-weight: 600; font-size: 11.5px; }
 input.vslider { writing-mode: vertical-lr; direction: rtl; appearance: slider-vertical; width: 26px; height: 170px; accent-color: var(--accent); cursor: pointer; margin: 0; }
 .folder-item input[type=checkbox] { accent-color: var(--accent); width: 16px; height: 16px; flex: 0 0 auto; }
+
+
+/* ------------------------------------------------------------------ pill buttons */
+.pill-btn { display: inline-flex; align-items: center; gap: 7px; padding: 6px 12px; border-radius: 99px; border: 1px solid var(--border); background: var(--panel2); color: var(--fg); font-weight: 600; font-size: 11.5px; line-height: 1; }
+.pill-btn svg { width: 15px; height: 15px; fill: currentColor; flex: 0 0 15px; }
+.pill-btn:hover { filter: brightness(1.25); }
+.pill-btn.on, .pill-btn[aria-pressed="true"] { background: var(--accent); color: var(--on-accent); border-color: transparent; }
+.pill-btn.static { margin-top: 10px; align-self: flex-start; }
+#cover-lyr-btn { position: absolute; right: 10px; top: 10px; z-index: 3; }
+
+/* ------------------------------------------------------------------ lyrics over the cover */
+#cover-shade { position: absolute; inset: 0; background: color-mix(in srgb, var(--bg) 58%, transparent); opacity: 0; transition: opacity .35s ease; pointer-events: none; }
+#cover-lyrics { position: absolute; inset: 0; opacity: 0; pointer-events: none; transition: opacity .35s ease; -webkit-mask-image: linear-gradient(transparent 0, #000 16%, #000 84%, transparent 100%); mask-image: linear-gradient(transparent 0, #000 16%, #000 84%, transparent 100%); }
+#cover-wrap #cover { transition: opacity .5s ease, filter .45s ease, transform .45s ease; }
+#cover-wrap.lyr-on #cover { filter: blur(15px) brightness(.5) saturate(1.1); transform: scale(1.2); }
+#cover-wrap.lyr-on #cover-shade { opacity: 1; }
+#cover-wrap.lyr-on #cover-lyrics { opacity: 1; pointer-events: auto; }
+#cover-wrap.lyr-on #cover-ph::after { opacity: .2; }
+#cover-lyrics { --ly-size: 15px; }
+
+/* the lyrics view itself (cover overlay and fullscreen) */
+.ly { overflow-y: auto; overflow-x: hidden; scrollbar-width: none; height: 100%; }
+.ly::-webkit-scrollbar { display: none; }
+.ly-in { position: relative; padding: 0 18px; }
+.ly-spacer { height: 40%; }
+.ly-line { font-size: var(--ly-size, 15px); font-weight: 700; line-height: 1.32; padding: 5px 0; color: var(--dim); transition: color .25s ease, transform .25s ease; transform-origin: left center; overflow-wrap: anywhere; }
+.ly-line.timed { cursor: pointer; }
+.ly-line.timed:hover { color: var(--fg); }
+.ly-line.cur { color: var(--fg); transform: scale(1.06); }
+.ly-line.plain { color: var(--fg); font-weight: 600; }
+.ly-line.gap { height: 0.9em; padding: 0; }
+.ly-msg { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; padding: 30% 22px 0; line-height: 1.5; color: var(--dim); }
+.ly-msg b { color: var(--fg); font-size: calc(var(--ly-size, 15px) * 1.15); }
+.ly-msg span { font-size: calc(var(--ly-size, 15px) * .8); font-weight: 600; }
+.ly-src, .ly-note { padding: 14px 0 0; color: var(--dim); font-size: 11.5px; font-weight: 600; }
+
+/* ------------------------------------------------------------------ fullscreen lyrics */
+#fs { position: fixed; inset: 0; z-index: 40; display: flex; flex-direction: column; background: #000; color: var(--fg); animation: fade .2s; }
+#fs[hidden] { display: none; }
+#fs .fs-bg { position: absolute; inset: -40px; background-size: cover; background-position: center; filter: blur(11px) brightness(.62) saturate(1.1); transition: opacity .6s ease; }
+#fs.no-art .fs-bg { background: linear-gradient(155deg, var(--bg), var(--bg2)); filter: none; }
+/* Left 70% (all text lives here): dark enough that every theme colour keeps >= 4.5:1 even over a white cover. The right edge lets the art show through. */
+#fs .fs-scrim { position: absolute; inset: 0; background: linear-gradient(90deg, color-mix(in srgb, var(--bg) 72%, transparent) 0, color-mix(in srgb, var(--bg) 72%, transparent) 70%, color-mix(in srgb, var(--bg) 10%, transparent) 100%); }
+.fs-top { position: relative; display: flex; align-items: center; gap: 16px; padding: 26px 5vw 0; }
+#fs-cover { width: 76px; height: 76px; border-radius: 12px; object-fit: cover; box-shadow: 0 10px 30px rgba(0, 0, 0, .55); flex: 0 0 76px; }
+#fs.no-art #fs-cover { display: none; }
+.fs-meta { flex: 0 1 62vw; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+#fs-title { font-size: clamp(18px, 2vw, 26px); font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#fs-artist { color: var(--accent); font-weight: 700; font-size: clamp(13px, 1.3vw, 17px); }
+#fs-album { color: var(--dim); font-weight: 600; font-size: 12.5px; }
+#fs-close { align-self: flex-start; margin-left: auto; background: color-mix(in srgb, var(--panel) 80%, transparent); transition: opacity .5s ease; }
+#fs-lyrics { position: relative; flex: 1; min-height: 0; margin: 0 5vw; --ly-size: clamp(22px, 3.3vw, 46px); -webkit-mask-image: linear-gradient(transparent 0, #000 12%, #000 86%, transparent 100%); mask-image: linear-gradient(transparent 0, #000 12%, #000 86%, transparent 100%); }
+#fs-lyrics .ly-in { max-width: min(62vw, 1000px); padding-left: 0; }
+.fs-bottom { position: relative; display: flex; align-items: center; gap: 18px; padding: 8px 5vw 26px; transition: opacity .6s ease; }
+#fs-seek { flex: 1; }
+#fs-time { color: var(--dim); font-variant-numeric: tabular-nums; min-width: 92px; }
+#fs.idle { cursor: none; }
+#fs.idle .fs-bottom, #fs.idle #fs-close { opacity: 0; pointer-events: none; }
+
+/* ------------------------------------------------------------------ drag to highlight */
+.marquee { position: absolute; z-index: 3; pointer-events: none; border: 1px solid var(--accent); background: color-mix(in srgb, var(--accent) 16%, transparent); border-radius: 3px; }
+.vlist.banding { cursor: crosshair; }

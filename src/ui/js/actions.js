@@ -49,3 +49,12 @@ export async function addPathsToPlaylist(paths, at = null) {
 export function rescan() {
   api.scan().then(() => emit('scan-start')).catch((e) => toast(e.message, { error: true }));
 }
+
+// "Open containing folder": the server opens it (Explorer with the file selected on Windows). If the file is missing it opens the nearest folder.
+export async function revealTrack(id) {
+  if (!id) return;
+  try {
+    const r = await api.post('/api/reveal', { id });
+    if (r.fallback) toast('That file is missing, so its folder was opened instead.', { ms: 3500 });
+  } catch (e) { toast(e.message || 'Could not open the folder.', { error: true }); }
+}

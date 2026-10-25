@@ -214,7 +214,7 @@ def run(data):
         pg.dblclick(".lib-row:has-text('Blue Harbor')"); pg.wait_for_function("() => window.__prism.S.playlists[1].items.length === 6")
         pg.wait_for_function("() => window.__prism.P.state==='playing'")
         check("album replaced the active playlist", pg.locator(".pl-row").count() == 6)
-        pg.click(".pl-row:nth-child(3) .t"); pg.keyboard.down("Shift"); pg.click(".pl-row:nth-child(5) .t"); pg.keyboard.up("Shift")
+        pg.locator(".pl-row .t").nth(2).click(); pg.keyboard.down("Shift"); pg.locator(".pl-row .t").nth(4).click(); pg.keyboard.up("Shift")
         check("shift-click selects a range", pg.locator(".pl-row.sel").count() == 3)
         pg.keyboard.press("Delete"); pg.wait_for_timeout(300)
         check("Delete removes selected tracks", pg.locator(".pl-row").count() == 3)
@@ -226,6 +226,7 @@ def run(data):
         pg.keyboard.press("Escape")
         # drag one row below another
         first = pg.locator(".pl-row .t").nth(0).inner_text()
+        pg.locator(".pl-row").nth(0).click(); pg.wait_for_timeout(150)      # a highlighted row is dragged to MOVE it (dragging an unhighlighted row highlights instead)
         pg.locator(".pl-row").nth(0).drag_to(pg.locator(".pl-row").nth(2), target_position={"x": 100, "y": 22}); pg.wait_for_timeout(300)
         after = pg.locator(".pl-row .t").all_inner_texts()
         check("drag & drop reorders the playlist", after[0] != first and first in after, str(after))
