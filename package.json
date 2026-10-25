@@ -1,0 +1,65 @@
+{
+  "name": "prism-player",
+  "version": "1.1.0",
+  "description": "Prism: a foobar2000-style music player whose colours follow the album art. Gapless playback, 10-band EQ, ReplayGain, WASAPI exclusive output, Last.fm / ListenBrainz scrobbling.",
+  "main": "electron/main.js",
+  "author": "Prism",
+  "license": "MIT",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dev": "node scripts/dev.js",
+    "test": "node --test --test-force-exit test/server.test.js test/color.test.mjs test/logic.test.mjs test/dsp.test.mjs test/folders.test.js test/audio.test.js",
+    "dist": "electron-builder --win nsis portable --x64 --publish never"
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.prism.player",
+    "productName": "Prism",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "electron/**",
+      "src/**",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "vendor/ffmpeg",
+        "to": "ffmpeg",
+        "filter": [
+          "ffmpeg.exe",
+          "ffprobe.exe"
+        ]
+      },
+      {
+        "from": "vendor/prism-audio",
+        "to": "prism-audio",
+        "filter": [
+          "prism-audio.exe"
+        ]
+      }
+    ],
+    "win": {
+      "icon": "build/icon.png",
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "perMachine": false
+    },
+    "portable": {
+      "artifactName": "Prism-portable-${version}.exe"
+    },
+    "artifactName": "Prism-Setup-${version}.${ext}"
+  }
+}
