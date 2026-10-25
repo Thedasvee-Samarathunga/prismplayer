@@ -1,0 +1,178 @@
+name: Build Prism (Windows)
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+# needed so the workflow can publish a GitHub Release
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Check out sources
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # Prism uses ffmpeg to decode everything the browser engine cannot play (DSD, ALAC, WavPack, APE, WMA, TTA, AIFF ...).
+      - name: Download ffmpeg
+        shell: pwsh
+        run: |
+          $urls = @(
+            'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-lgpl.zip',
+            'https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip'
+          )
+          $ok = $false
+          foreach ($u in $urls) {
+            try {
+              Invoke-WebRequest -Uri $u -OutFile ffmpeg.zip -UserAgent 'Mozilla/5.0'
+              if ((Get-Item ffmpeg.zip).Length -gt 5000000) { Write-Host "Using $u"; $ok = $true; break }
+            } catch { Write-Host "Could not download $u : $_" }
+          }
+          if (-not $ok) { throw 'Could not download ffmpeg' }
+          Expand-Archive ffmpeg.zip -DestinationPath ffmpeg-tmp -Force
+          $ff = Get-ChildItem ffmpeg-tmp -Recurse -Filter ffmpeg.exe | Select-Object -First 1
+          $fp = Get-ChildItem ffmpeg-tmp -Recurse -Filter ffprobe.exe | Select-Object -First 1
+          if (-not $ff -or -not $fp) { throw 'ffmpeg.exe / ffprobe.exe not found in the download' }
+          New-Item -ItemType Directory -Force vendor/ffmpeg | Out-Null
+          Copy-Item $ff.FullName vendor/ffmpeg/ffmpeg.exe
+          Copy-Item $fp.FullName vendor/ffmpeg/ffprobe.exe
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # Native audio helper: WASAPI exclusive / shared output (one small C file).
+      - name: Build the native audio helper (WASAPI)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force vendor/prism-audio | Out-Null
+          $out = 'vendor/prism-audio/prism-audio.exe'
+          python -m pip install --quiet ziglang
+          python -m ziglang cc -target x86_64-windows-gnu -O2 -o $out native/prism-audio.c -lole32 -loleaut32 -luuid -lavrt -lm
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path $out)) {
+            Write-Host 'Zig build failed, trying the MinGW gcc that ships with the runner'
+            gcc -O2 -o $out native/prism-audio.c -lole32 -loleaut32 -luuid -lavrt -lm
+          }
+          if (-not (Test-Path $out)) { throw 'prism-audio.exe was not built' }
+          Get-Item $out | Select-Object Name, Length
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Build installer + portable exe
+        run: npm run dist
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+      - name: Show what was built
+        shell: pwsh
+        run: Get-ChildItem dist -Filter *.exe | Select-Object Name, @{n='MB';e={[math]::Round($_.Length/1MB,1)}}
+
+      # ------------------------------------------------------------------------------------------------------------------
+      # LAUNCH TESTS. These start the real app on the Windows runner: its server, the bundled ffmpeg + audio helper, a real
+      # decode, and a window that loads the interface. Both the unpacked build and the INSTALLED copy are tested, so an app
+      # that would open and silently close shows up here, with its log, instead of on your PC.
+      # ------------------------------------------------------------------------------------------------------------------
+      - name: Self-test the unpacked app
+        id: smoke_unpacked
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force diagnostics | Out-Null
+          $out = Join-Path $PWD 'diagnostics/smoke-unpacked.json'
+          $p = Start-Process -FilePath 'dist/win-unpacked/Prism.exe' -ArgumentList '--smoke-test', "--smoke-out=$out" -PassThru
+          if (-not $p.WaitForExit(120000)) { $p.Kill(); throw 'the self-test did not finish in 2 minutes' }
+          if (Test-Path $out) { Get-Content $out } else { Write-Host 'no result file was written' }
+          if ($p.ExitCode -ne 0) { throw "self-test failed (exit code $($p.ExitCode))" }
+
+      - name: Install silently and self-test the INSTALLED app
+        id: smoke_installed
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force diagnostics | Out-Null
+          $setup = (Get-ChildItem dist -Filter 'Prism-Setup-*.exe' | Select-Object -First 1).FullName
+          $dir = 'C:\PrismInstalled'
+          $i = Start-Process -FilePath $setup -ArgumentList '/S', "/D=$dir" -PassThru -Wait
+          Write-Host "installer exit code: $($i.ExitCode)"
+          if (-not (Test-Path "$dir\Prism.exe")) { throw 'the installer did not produce Prism.exe' }
+          Get-ChildItem $dir | Select-Object Name, Length | Format-Table | Out-Host
+          Get-ChildItem "$dir\resources" -Recurse -File | Where-Object { $_.Name -match 'ffmpeg|ffprobe|prism-audio|app.asar' } | Select-Object FullName, Length | Format-Table -AutoSize | Out-Host
+          $out = Join-Path $PWD 'diagnostics/smoke-installed.json'
+          $t = Start-Process -FilePath "$dir\Prism.exe" -ArgumentList '--smoke-test', "--smoke-out=$out" -PassThru
+          if (-not $t.WaitForExit(120000)) { $t.Kill(); throw 'the installed app did not finish its self-test in 2 minutes' }
+          if (Test-Path $out) { Get-Content $out } else { Write-Host 'no result file was written' }
+          if ($t.ExitCode -ne 0) { throw "installed self-test failed (exit code $($t.ExitCode))" }
+
+      - name: Start the INSTALLED app normally and keep it open for 15 seconds
+        id: launch_installed
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $dir = 'C:\PrismInstalled'
+          $t = Start-Process -FilePath "$dir\Prism.exe" -PassThru
+          Start-Sleep -Seconds 15
+          $log = Join-Path $env:APPDATA 'Prism\prism-error.log'
+          if (Test-Path $log) { Copy-Item $log 'diagnostics/prism-error.log' -Force; Write-Host '--- prism-error.log ---'; Get-Content $log }
+          $t.Refresh()
+          if ($t.HasExited) { throw "Prism closed by itself after less than 15 seconds (exit code $($t.ExitCode))" }
+          Write-Host "Prism is still running. Main window handle: $($t.MainWindowHandle)"
+          Stop-Process -Id $t.Id -Force
+
+      - name: Collect diagnostics
+        if: always()
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force diagnostics | Out-Null
+          $log = Join-Path $env:APPDATA 'Prism\prism-error.log'
+          if (Test-Path $log) { Copy-Item $log 'diagnostics/prism-error.log' -Force }
+          Get-ChildItem diagnostics | Select-Object Name, Length
+
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Prism-diagnostics
+          path: diagnostics/*
+          if-no-files-found: ignore
+
+      # The .exe files also go on the repository's Releases page: a normal download link, no Artifacts section needed.
+      - name: Publish a GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          UNPACKED: ${{ steps.smoke_unpacked.outcome }}
+          INSTALLED: ${{ steps.smoke_installed.outcome }}
+          LAUNCHED: ${{ steps.launch_installed.outcome }}
+        run: |
+          $files = @(Get-ChildItem dist -Filter *.exe | ForEach-Object { $_.FullName })
+          if ($files.Count -eq 0) { throw 'No .exe files were produced in dist/' }
+          $tag = "build-${{ github.run_number }}"
+          $mark = { param($o) if ($o -eq 'success') { 'passed' } else { 'FAILED' } }
+          $notes = "Prism for Windows. Download Prism-portable (no install) or Prism-Setup (installer). SmartScreen may warn because the app is not code-signed: More info > Run anyway.`n`nLaunch tests on the build machine: unpacked app $(& $mark $env:UNPACKED), installed app self-test $(& $mark $env:INSTALLED), installed app kept open 15 s $(& $mark $env:LAUNCHED). If any failed, open the workflow run and download the Prism-diagnostics artifact."
+          gh release create $tag @files --repo "${{ github.repository }}" --target "${{ github.sha }}" --title "Prism build ${{ github.run_number }}" --notes $notes
+
+      # Backup copy as a workflow artifact too
+      - name: Upload Prism (artifact)
+        uses: actions/upload-artifact@v4
+        with:
+          name: Prism-windows
+          path: dist/*.exe
+          if-no-files-found: error
+
+      # After everything is published: turn the run red when a launch test failed, so it cannot be missed.
+      - name: Report launch test result
+        if: steps.smoke_unpacked.outcome != 'success' || steps.smoke_installed.outcome != 'success' || steps.launch_installed.outcome != 'success'
+        shell: pwsh
+        run: |
+          Write-Host 'At least one launch test failed. The build was still published so you can try it, but please send me the log of the failed step (and the Prism-diagnostics artifact).'
+          exit 1
