@@ -5,6 +5,10 @@ on:
     branches: [main, master]
   workflow_dispatch:
 
+# needed so the workflow can publish a GitHub Release
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: windows-latest
@@ -18,7 +22,6 @@ jobs:
           node-version: 20
 
       # Prism uses ffmpeg to decode everything the browser engine cannot play (DSD, ALAC, WavPack, APE, WMA, TTA, AIFF ...).
-      # Only decoding is needed, so the smaller LGPL build is enough.
       - name: Download ffmpeg
         shell: pwsh
         run: |
@@ -41,14 +44,13 @@ jobs:
           New-Item -ItemType Directory -Force vendor/ffmpeg | Out-Null
           Copy-Item $ff.FullName vendor/ffmpeg/ffmpeg.exe
           Copy-Item $fp.FullName vendor/ffmpeg/ffprobe.exe
-          & vendor/ffmpeg/ffmpeg.exe -hide_banner -decoders | Select-String -Pattern 'dsd|ape|wavpack|alac|wmav2|tta' | Select-Object -First 12
 
-      # Native audio helper: WASAPI exclusive / shared output. One small C file, compiled with Zig's bundled MinGW headers.
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
 
+      # Native audio helper: WASAPI exclusive / shared output (one small C file).
       - name: Build the native audio helper (WASAPI)
         shell: pwsh
         run: |
@@ -62,7 +64,6 @@ jobs:
           }
           if (-not (Test-Path $out)) { throw 'prism-audio.exe was not built' }
           Get-Item $out | Select-Object Name, Length
-          try { & $out list } catch { Write-Host 'device list not available on the runner (expected)' }
 
       - name: Install dependencies
         run: npm install --no-audit --no-fund
@@ -72,10 +73,25 @@ jobs:
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
 
-      - name: Upload Prism
+      - name: Show what was built
+        shell: pwsh
+        run: Get-ChildItem dist -Filter *.exe | Select-Object Name, @{n='MB';e={[math]::Round($_.Length/1MB,1)}}
+
+      # The .exe files also go on the repository's Releases page: a normal download link, no Artifacts section needed.
+      - name: Publish a GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $files = @(Get-ChildItem dist -Filter *.exe | ForEach-Object { $_.FullName })
+          if ($files.Count -eq 0) { throw 'No .exe files were produced in dist/' }
+          $tag = "build-${{ github.run_number }}"
+          gh release create $tag @files --repo "${{ github.repository }}" --target "${{ github.sha }}" --title "Prism build ${{ github.run_number }}" --notes "Prism for Windows. Download Prism-portable (no install) or Prism-Setup (installer). SmartScreen may warn because the app is not code-signed: More info > Run anyway."
+
+      # Backup copy as a workflow artifact too
+      - name: Upload Prism (artifact)
         uses: actions/upload-artifact@v4
         with:
           name: Prism-windows
-          path: |
-            dist/*.exe
+          path: dist/*.exe
           if-no-files-found: error
