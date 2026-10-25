@@ -472,12 +472,13 @@ input.vslider { writing-mode: vertical-lr; direction: rtl; appearance: slider-ve
 
 
 /* ------------------------------------------------------------------ looks: flat and pastel (both solid); vivid colours */
-html[data-look="pastel"] { color-scheme: light; }
-html[data-look="pastel"] .panel { border-color: color-mix(in srgb, #fff 60%, var(--border)); box-shadow: 0 8px 28px rgba(40, 40, 80, .10), inset 0 1px 0 rgba(255, 255, 255, .55); }
-html[data-look="pastel"] .menu, html[data-look="pastel"] .modal { border-color: color-mix(in srgb, #fff 60%, var(--border)); box-shadow: 0 24px 70px rgba(40, 40, 80, .28); }
-html[data-look="pastel"] .modal-wrap, html[data-look="pastel"] #recap { background: rgba(255, 255, 255, .34); }
-html[data-look="pastel"] .toast { box-shadow: 0 10px 30px rgba(40, 40, 80, .22); }
-html[data-look="pastel"] .rc-cover b { background: rgba(20, 20, 30, .7); color: #fff; }
+html[data-look="pastel"], html[data-look="frost"] { color-scheme: light; }
+html[data-look="glass"] { color-scheme: dark; }
+html[data-look="pastel"] .panel, html[data-look="frost"] .panel { border-color: color-mix(in srgb, #fff 60%, var(--border)); box-shadow: 0 8px 28px rgba(40, 40, 80, .10), inset 0 1px 0 rgba(255, 255, 255, .55); }
+html[data-look="pastel"] .menu, html[data-look="pastel"] .modal, html[data-look="frost"] .menu, html[data-look="frost"] .modal { border-color: color-mix(in srgb, #fff 60%, var(--border)); box-shadow: 0 24px 70px rgba(40, 40, 80, .28); }
+html[data-look="pastel"] .modal-wrap, html[data-look="pastel"] #recap, html[data-look="frost"] .modal-wrap, html[data-look="frost"] #recap { background: rgba(255, 255, 255, .34); }
+html[data-look="pastel"] .toast, html[data-look="frost"] .toast { box-shadow: 0 10px 30px rgba(40, 40, 80, .22); }
+html[data-look="pastel"] .rc-cover b, html[data-look="frost"] .rc-cover b { background: rgba(20, 20, 30, .7); color: #fff; }
 html[data-colors="vivid"][data-look="flat"] .panel { box-shadow: 0 10px 34px rgba(0, 0, 0, .35), 0 0 0 1px color-mix(in srgb, var(--accent) 24%, transparent), 0 0 28px color-mix(in srgb, var(--accent2) 10%, transparent); }
 html[data-colors="vivid"] .icon-btn.primary { box-shadow: 0 0 22px color-mix(in srgb, var(--accent) 60%, transparent); }
 html[data-colors="vivid"] .tab.active { box-shadow: inset 0 -3px 0 var(--shade2); }
@@ -605,3 +606,7 @@ html[data-square="1"] .vz-grip::after { border-radius: 0 !important; }
 .dj-next li { display: flex; flex-direction: column; padding: 5px 8px; border-radius: 8px; background: var(--panel2); counter-increment: n; }
 .dj-next .t { font-weight: 700; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dj-next .a { color: var(--dim); font-size: 11px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* frosted glass (dark): a soft light edge; the panels are translucent colours over the pre-blurred window picture (no backdrop-filter) */
+html[data-look="glass"] .panel { border-color: color-mix(in srgb, #fff 16%, var(--border)); box-shadow: 0 8px 30px rgba(0, 0, 0, .28), inset 0 1px 0 rgba(255, 255, 255, .10); }
+html[data-look="glass"] .menu, html[data-look="glass"] .modal { border-color: color-mix(in srgb, #fff 16%, var(--border)); box-shadow: 0 24px 70px rgba(0, 0, 0, .5); }

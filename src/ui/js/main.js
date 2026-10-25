@@ -128,7 +128,7 @@ function menuDefs() {
       { label: 'Scroll to playing track', action: () => plView.scrollToPlaying() },
       { sep: true },
       { label: 'Colours', submenu: [['standard', 'Album colours'], ['vivid', 'Album colours: vivid'], ['mono', 'Black and white']].map(([id, l]) => ({ label: l, radio: styleOf(S.settings).colors === id, action: () => saveSettings({ appearance: { colors: id }, dynamicColors: id !== 'mono' }) })) },
-      { label: 'Look', submenu: [['flat', 'Flat'], ['pastel', 'Pastel']].map(([id, l]) => ({ label: l, radio: styleOf(S.settings).look === id, disabled: styleOf(S.settings).colors === 'mono', action: () => saveSettings({ appearance: { look: id } }) })) },
+      { label: 'Look', submenu: [['flat', 'Flat'], ['pastel', 'Pastel'], ['glass', 'Frosted glass'], ['frost', 'Frosted pastel']].map(([id, l]) => ({ label: l, radio: styleOf(S.settings).look === id, disabled: styleOf(S.settings).colors === 'mono', action: () => saveSettings({ appearance: { look: id } }) })) },
       { label: 'Square corners', checked: !!styleOf(S.settings).square, action: () => saveSettings({ appearance: { square: !styleOf(S.settings).square } }) },
       { label: 'Visualiser quality', submenu: [['smooth', 'Smooth (60 fps, glow)'], ['balanced', 'Balanced (30 fps)'], ['light', 'Light (20 fps, lowest load)']].map(([id, l]) => ({ label: l, radio: styleOf(S.settings).perf === id, action: () => saveSettings({ appearance: { perf: id } }) })) },
     ] },

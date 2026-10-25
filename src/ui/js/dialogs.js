@@ -324,6 +324,8 @@ export function settingsDialog({ onFoldersChanged, tab: startTab } = {}) {
       <div class="choice-row two" role="radiogroup" aria-label="Look" id="ap-looks">
         <label class="choice"><input type="radio" name="ap-look" value="flat"><b>Flat</b><span>Solid dark panels.</span></label>
         <label class="choice"><input type="radio" name="ap-look" value="pastel"><b>Pastel</b><span>Soft, light, solid panels tinted with the album's colours.</span></label>
+        <label class="choice"><input type="radio" name="ap-look" value="glass"><b>Frosted glass</b><span>Dark, see-through panels over the soft blurred album picture.</span></label>
+        <label class="choice"><input type="radio" name="ap-look" value="frost"><b>Frosted pastel</b><span>Light, see-through panels over the soft blurred album picture.</span></label>
       </div>
       <p class="note" id="ap-note"></p>
       <div class="field" style="margin-top:20px"><span class="lab">Shape and layout</span></div>

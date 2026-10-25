@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """End-to-end tests (real UI in headless Chromium + real server + real audio) for the 2.0.2 speed patch:
  * there is no backdrop-filter anywhere, and no CSS filter on the window background (a small pre-blurred picture is used instead)
- * the glass / frosted / liquid looks and the background blur are gone; old saved settings fall back to the solid looks
+ * liquid and the background blur are gone (a saved liquid becomes flat); the frosted looks are translucent panels over the pre-blurred picture, no filters
  * only ONE seek-bar loop runs, however many tracks were played (it used to start another one for every track and play-state change)
  * visualiser quality levels: frame rate cap, no glow unless 'smooth', nothing drawn while the window is minimised
  * the background pre-decoding of upcoming tracks waits until the new track has been playing for a moment
@@ -74,22 +74,26 @@ def run():
         pg.click("#menubar >> text=File"); pg.click(".menu-item:has-text('Settings')"); pg.wait_for_selector(".modal")
         check("with a dialog open there is still no backdrop-filter (the dimming layer is plain)", pg.evaluate(ALL_BF) == [], str(pg.evaluate(ALL_BF)))
         pg.click(".tabs-inline .tab:has-text('Appearance')"); pg.wait_for_selector("input[name=ap-colors]")
-        check("Appearance offers exactly two looks (flat, pastel) and no background blur", pg.locator("input[name=ap-look]").count() == 2 and pg.locator("input[name=ap-blur]").count() == 0 and "Background blur" not in pg.locator(".modal").inner_text())
+        check("Appearance offers four looks (flat, pastel, frosted glass, frosted pastel) and no background blur", pg.locator("input[name=ap-look]").count() == 4 and pg.locator("input[name=ap-blur]").count() == 0 and "Background blur" not in pg.locator(".modal").inner_text())
         check("and a visualiser quality choice, balanced by default", pg.locator("#ap-perf").count() == 1 and pg.input_value("#ap-perf") == "balanced")
         pg.select_option("#ap-perf", "light"); pg.wait_for_timeout(800)
         check("choosing it is saved", pg.evaluate("window.__prism.S.settings.appearance.perf") == "light")
+        settings(pg, {"appearance": {"look": "frost"}}); pg.wait_for_timeout(600)
+        fr = pg.evaluate("(() => { const c = getComputedStyle(document.querySelector('#pl')); return [c.backgroundColor, c.backdropFilter]; })()")
+        check("frosted looks are translucent colours with no backdrop-filter", fr[0].startswith("rgba(") and fr[1] == "none", str(fr))
+        settings(pg, {"appearance": {"look": "flat"}})
         pg.screenshot(path=f"{OUT}/100-appearance.png"); pg.keyboard.press("Escape"); pg.wait_for_timeout(300)
         pg.click("#menubar >> text=View")
         labels = pg.locator(".menu-item .lbl").all_inner_texts()
         check("the View menu has no 'Background blur' and no 'Shake the liquid', but has 'Visualiser quality'", "Background blur" not in labels and "Shake the liquid" not in labels and "Visualiser quality" in labels, str(labels))
         pg.hover(".menu-item:has-text('Look')"); pg.wait_for_timeout(300)
         sub = pg.locator(".menu").last.locator(".menu-item .lbl").all_inner_texts()
-        check("the Look submenu lists Flat and Pastel only", sub == ["Flat", "Pastel"], str(sub))
+        check("the Look submenu lists the four looks", sub == ["Flat", "Pastel", "Frosted glass", "Frosted pastel"], str(sub))
         pg.keyboard.press("Escape")
         settings(pg, {"appearance": {"perf": "balanced"}})
         # ================================================================== old settings
         print("old saved looks and blur settings fall back to the solid looks")
-        for saved, want in (("glass", "flat"), ("liquid", "flat"), ("frost", "pastel"), ("pastel", "pastel"), ("flat", "flat")):
+        for saved, want in (("glass", "glass"), ("liquid", "flat"), ("frost", "frost"), ("pastel", "pastel"), ("flat", "flat")):
             api_settings(pg, {"appearance": {"look": saved, "blur": "cover"}})
             pg.reload(); pg.wait_for_function("() => window.__prism && window.__prism.S.list.length === 16", timeout=20000); pg.wait_for_timeout(500)
             got = pg.evaluate("({look: document.documentElement.dataset.look, blur: document.documentElement.dataset.blur, bf: getComputedStyle(document.querySelector('#pl')).backdropFilter})")
@@ -177,7 +181,7 @@ def run():
         # ================================================================== readable text over the baked backdrop
         print("text contrast on real pixels over the pre-blurred backdrop")
         covers = [("Ember", "red"), ("White Out (96k/24)", "white"), ("Nothing (mono)", "black"), ("Endurance", "gold"), ("One Bit Wonder", "purple")]
-        for look in ("flat", "pastel"):
+        for look in ("flat", "pastel", "glass", "frost"):
             for colors in ("standard", "vivid"):
                 settings(pg, {"appearance": {"colors": colors, "look": look}, "dynamicColors": True})
                 for title, label in covers:

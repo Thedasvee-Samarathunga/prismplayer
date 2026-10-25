@@ -1,6 +1,6 @@
 {
   "name": "prism-player",
-  "version": "2.0.2",
+  "version": "2.0.3",
   "description": "Prism: a foobar2000-style music player whose colours follow the album art. Cue sheets, music DJ with auto-mix, Last.fm play counts and recap summary, two solid looks, up to six resizable visualisers, synced lyrics, gapless playback, 10-band EQ, ReplayGain, WASAPI exclusive output, smart caching, customizable hotkeys.",
   "main": "electron/main.js",
   "author": "Prism",

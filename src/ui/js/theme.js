@@ -17,8 +17,9 @@ let token = 0;
 
 /** The effective style from the settings. Older settings (dynamicColors=false) mean black & white.
  *  2.0.2: the see-through looks (frosted glass, frosted pastel, liquid) and the background blur are gone (they made the text soft and kept the GPU busy).
- *  A saved choice of one of them becomes its solid sibling: glass -> flat, frost -> pastel, liquid -> flat; the blur is always off. */
-const LOOK_MAP = { flat: 'flat', pastel: 'pastel', glass: 'flat', frost: 'pastel', liquid: 'flat' };
+ *  2.0.3: frosted glass (dark) and frosted pastel (light) are back, WITHOUT any backdrop-filter: the window picture is already blurred (see backdrop.js), so panels that are
+ *  simply translucent over it look frosted at no cost and text stays sharp. liquid -> flat; the extra background blur stays off. */
+const LOOK_MAP = { flat: 'flat', pastel: 'pastel', glass: 'glass', frost: 'frost', liquid: 'flat' };       // (liquid and the background blur stay gone)
 export function styleOf(settings) {
   const a = (settings && settings.appearance) || {};
   let colors = a.colors === 'vivid' ? 'vivid' : a.colors === 'mono' ? 'mono' : 'standard';
