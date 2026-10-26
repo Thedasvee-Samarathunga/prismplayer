@@ -162,7 +162,7 @@ function setFsMeta(track) {
     fsEls.root.dataset.cover = url;
     fsEls.root.classList.add('no-art');
     // the slightly blurred, darkened background is made once on a small canvas (a 192 px version stretched over the screen), not by a screen-sized CSS blur filter
-    bakeBlur(url, { size: 192, saturate: 1.1, brightness: 0.62 }).then((baked) => {
+    bakeBlur(url, { size: 96, saturate: 1.2, brightness: 0.62 }).then((baked) => {
       if (fsEls.root.dataset.cover !== url) return;
       if (!baked) { fsEls.bg.style.backgroundImage = ''; fsEls.cover.removeAttribute('src'); return; }
       fsEls.bg.style.backgroundImage = `url("${baked}")`; fsEls.cover.src = url; fsEls.root.classList.remove('no-art');

@@ -16,6 +16,9 @@ const boot = require('./boot');
 // the Windows taskbar groups windows, pins and shows the icon by this id (it must match the installer's appId, see package.json)
 if (typeof app.setAppUserModelId === 'function') app.setAppUserModelId('com.prism.player');
 
+// keep the old data folder (%APPDATA%\Prism) so settings, library and cache survive the rename
+app.setPath('userData', path.join(app.getPath('appData'), 'Prism'));
+
 const args = boot.parseArgs(process.argv);
 if (args.smoke) app.setPath('userData', fs.mkdtempSync(path.join(os.tmpdir(), 'prism-smoke-')));      // a throw-away profile: never collides with a running Prism
 
@@ -102,7 +105,7 @@ async function createWindow() {
   const b = loadBounds();
   win = new BrowserWindow({
     width: b.width || 1480, height: b.height || 900, x: b.x, y: b.y, minWidth: 900, minHeight: 600,
-    backgroundColor: '#000000', show: false, title: 'Prism',
+    backgroundColor: '#000000', show: false, title: 'Prism Player',
     // the window / taskbar icon: the packaged app carries it next to the program (resources/icon/icon.png, see extraResources in package.json: the build folder is not
     // inside the app), a development run reads it from build/. Without this the window depended on the icon stored in Prism.exe alone.
     icon: [process.resourcesPath && path.join(process.resourcesPath, 'icon', 'icon.png'), path.join(__dirname, '..', 'build', 'icon.png'), path.join(__dirname, '..', 'build', 'icon.ico')].filter(Boolean).find((f) => fs.existsSync(f)),

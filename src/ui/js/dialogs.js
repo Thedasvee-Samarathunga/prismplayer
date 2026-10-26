@@ -596,5 +596,5 @@ export function shortcutsDialog() {
 }
 
 export function aboutDialog(info) {
-  modal({ title: 'About Prism', body: `<p class="note" style="font-size:12.5px;color:var(--fg)">Prism is a foobar2000-style music player whose colours follow the album art. It plays MP3, FLAC, AAC/M4A, ALAC, WAV, AIFF, OGG, Opus, DSD (DSF/DFF), WavPack, APE, WMA, TTA and more, and scrobbles to Last.fm and ListenBrainz.</p><p class="note">Audio is decoded by the browser engine where possible and by ffmpeg for everything else. ${info ? escapeHtml(info) : ''}</p><p class="note">Font: Montserrat (SIL Open Font License).</p>` });
+  modal({ title: 'About Prism Player', body: `<p class="note" style="font-size:12.5px;color:var(--fg)">Prism is a foobar2000-style music player whose colours follow the album art. It plays MP3, FLAC, AAC/M4A, ALAC, WAV, AIFF, OGG, Opus, DSD (DSF/DFF), WavPack, APE, WMA, TTA and more, and scrobbles to Last.fm and ListenBrainz.</p><p class="note">Audio is decoded by the browser engine where possible and by ffmpeg for everything else. ${info ? escapeHtml(info) : ''}</p><p class="note">Font: Montserrat (SIL Open Font License).</p>` });
 }

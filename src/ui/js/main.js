@@ -154,7 +154,7 @@ function menuDefs() {
     { label: 'DJ', html: djLabel(), className: 'dj-btn', title: 'Music DJ: an endless auto-mix by genre or from the whole library', action: toggleDjPanel },
     { label: 'Help', items: () => [
       { label: 'Keyboard shortcuts', action: shortcutsDialog },
-      { label: 'About Prism', action: () => aboutDialog(`${S.list.length} tracks in library.`) },
+      { label: 'About Prism Player', action: () => aboutDialog(`${S.list.length} tracks in library.`) },
     ] },
   ];
 }

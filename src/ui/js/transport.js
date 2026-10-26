@@ -127,9 +127,9 @@ export function initTransport() {
     $('np-line-artist').textContent = displayArtist(track);
     $('st-tech').textContent = techLine(track);
     $('st-out').textContent = engine.info().label;
-    document.title = `${displayArtist(track)} - ${track.title} [Prism]`;
+    document.title = `${displayArtist(track)} - ${track.title} [Prism Player]`;
   });
-  on('playstate', (s) => { if (s === 'stopped') document.title = 'Prism'; });
+  on('playstate', (s) => { if (s === 'stopped') document.title = 'Prism Player'; });
   paintState();
   return { paintOrder, setVol, paintVol };
 }

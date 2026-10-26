@@ -122,7 +122,7 @@ export async function themeForTrack(track) {
   applyTheme(theme);
   // the blurred cover behind the window: made once (a 32 px version, more colourful and darker; never brighter than the theme's contrast model assumes), then just stretched
   const bright = theme.backdrop && theme.backdrop.max != null ? theme.backdrop.max : 0.55;
-  const url = await bakeBlur(api.coverUrl(track.id, 160), { size: 32, saturate: 1.5, brightness: Math.min(1, bright) });
+  const url = await bakeBlur(api.coverUrl(track.id, 400), { size: 64, saturate: 1.5, brightness: Math.min(1, bright) });
   if (my !== token) return;
   setBackdrop(url);
 }

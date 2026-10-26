@@ -18,7 +18,7 @@
   },
   "build": {
     "appId": "com.prism.player",
-    "productName": "Prism",
+    "productName": "Prism Player",
     "directories": {
       "output": "dist",
       "buildResources": "build"

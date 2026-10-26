@@ -48,12 +48,23 @@ export function bakeBlur(url, { size = 32, saturate = 1, brightness = 1 } = {}) 
     if (img && img.naturalWidth) {
       try {
         const small = squareScaled(img, img.naturalWidth, img.naturalHeight, size);
-        const c = document.createElement('canvas'); c.width = c.height = size;
-        const x = c.getContext('2d');
-        if (saturate !== 1 && 'filter' in x) x.filter = `saturate(${saturate})`;      // (a canvas without filter support just skips the colour boost)
-        x.drawImage(small, 0, 0);
+        // Bake at a larger output size and blur ONCE here (one-time cost per cover; nothing is redone while playing).
+        // Stretching a 32 px bitmap gave visible blocky/diamond artefacts and banding; a smooth upscale + real blur + dither does not.
+        const out_px = Math.max(256, size * 2);
+        const c = document.createElement('canvas'); c.width = c.height = out_px;
+        const x = c.getContext('2d'); x.imageSmoothingEnabled = true; x.imageSmoothingQuality = 'high';
+        const f = [];
+        if (saturate !== 1) f.push(`saturate(${saturate})`);
+        f.push(`blur(${Math.round(out_px / 14)}px)`);
+        if ('filter' in x) x.filter = f.join(' ');
+        const m = Math.round(out_px / 14) * 2;                               // overdraw so the blur does not fade at the edges
+        x.drawImage(small, -m, -m, out_px + 2 * m, out_px + 2 * m);
         x.filter = 'none';
-        if (brightness < 1) { x.fillStyle = `rgba(0,0,0,${(1 - brightness).toFixed(4)})`; x.fillRect(0, 0, size, size); }
+        if (brightness < 1) { x.fillStyle = `rgba(0,0,0,${(1 - brightness).toFixed(4)})`; x.fillRect(0, 0, out_px, out_px); }
+        // light dither noise: hides the 8-bit banding that dark, smooth gradients otherwise show
+        const id = x.getImageData(0, 0, out_px, out_px), d = id.data;
+        for (let i = 0; i < d.length; i += 4) { const n = (Math.random() - 0.5) * 3; d[i] += n; d[i + 1] += n; d[i + 2] += n; }
+        x.putImageData(id, 0, 0);
         out = c.toDataURL('image/png');
       } catch (_) { out = null; }
     }
