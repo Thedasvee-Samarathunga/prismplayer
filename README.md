@@ -1,4 +1,4 @@
-# Prism
+# Prism Player
 
 A foobar2000-style music player whose whole interface takes its colours from the album that is playing.
 
