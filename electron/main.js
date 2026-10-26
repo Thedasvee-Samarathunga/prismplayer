@@ -17,7 +17,7 @@ const boot = require('./boot');
 if (typeof app.setAppUserModelId === 'function') app.setAppUserModelId('com.prism.player');
 
 // keep the old data folder (%APPDATA%\Prism) so settings, library and cache survive the rename
-app.setPath('userData', path.join(app.getPath('appData'), 'Prism'));
+{ const ud = app.getPath('userData'); if (path.basename(ud) === 'Prism Player') app.setPath('userData', path.join(path.dirname(ud), 'Prism')); }
 
 const args = boot.parseArgs(process.argv);
 if (args.smoke) app.setPath('userData', fs.mkdtempSync(path.join(os.tmpdir(), 'prism-smoke-')));      // a throw-away profile: never collides with a running Prism

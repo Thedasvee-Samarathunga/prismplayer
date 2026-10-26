@@ -1,1 +1,40 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><defs><linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#1c183a"/><stop offset="1" stop-color="#090a14"/></linearGradient><linearGradient id="g" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#00d6ff"/><stop offset=".5" stop-color="#7c52ff"/><stop offset="1" stop-color="#ff3a8a"/></linearGradient></defs><rect width="64" height="64" rx="14.4" fill="url(#bg)"/><path d="M32 7.75 55.5 50.75H8.5Z" fill="url(#g)" stroke="url(#g)" stroke-width="2.6" stroke-linejoin="round"/><path d="M32 7.75V50.75H8.5Z" fill="#fff" opacity=".22"/></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+<defs>
+  <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#2a2f55"/><stop offset=".55" stop-color="#171a33"/><stop offset="1" stop-color="#0a0b18"/></linearGradient>
+  <radialGradient id="amb" cx=".68" cy=".5" r=".6"><stop offset="0" stop-color="#7a5cff" stop-opacity=".45"/><stop offset=".5" stop-color="#2d7bff" stop-opacity=".15"/><stop offset="1" stop-color="#000" stop-opacity="0"/></radialGradient>
+  <linearGradient id="glass" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ffffff" stop-opacity=".78"/><stop offset=".5" stop-color="#cfd8ff" stop-opacity=".30"/><stop offset="1" stop-color="#9fb4ff" stop-opacity=".16"/></linearGradient>
+  <linearGradient id="edge" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#fff"/><stop offset=".5" stop-color="#bfd0ff"/><stop offset="1" stop-color="#8fa8ff"/></linearGradient>
+  <linearGradient id="inbeam" x1="0" y1="1" x2="1" y2="0"><stop offset="0" stop-color="#fff" stop-opacity="0"/><stop offset=".7" stop-color="#fff" stop-opacity=".95"/><stop offset="1" stop-color="#fff"/></linearGradient>
+  <linearGradient id="fade" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#fff" stop-opacity="1"/><stop offset=".75" stop-color="#fff" stop-opacity=".92"/><stop offset="1" stop-color="#fff" stop-opacity=".78"/></linearGradient>
+  <mask id="fm"><rect width="1024" height="1024" fill="url(#fade)"/></mask>
+  <filter id="b8" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="4"/></filter>
+  <filter id="b26" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="26"/></filter>
+  <filter id="b3"><feGaussianBlur stdDeviation="2.5"/></filter>
+  <clipPath id="sq"><rect width="1024" height="1024" rx="228"/></clipPath>
+</defs>
+<g clip-path="url(#sq)">
+  <rect width="1024" height="1024" fill="url(#bg)"/>
+  <rect width="1024" height="1024" fill="url(#amb)"/>
+  <!-- rainbow glow + fan (exits the right side of the prism) -->
+  <g mask="url(#fm)">
+    <g filter="url(#b26)" opacity=".75">
+      <polygon points="640,500 1100,250 1100,330" fill="#ff2d55"/><polygon points="640,500 1100,420 1100,520" fill="#ffd400"/><polygon points="640,500 1100,560 1100,650" fill="#19c3ff"/><polygon points="640,500 1100,680 1100,760" fill="#b04dff"/>
+    </g>
+    <g filter="url(#b8)">
+      <polygon points="640,498 1100,262 1100,350" fill="#ff2d55"/>
+      <polygon points="640,498 1100,350 1100,438" fill="#ff8a00"/>
+      <polygon points="640,498 1100,438 1100,526" fill="#ffe600"/>
+      <polygon points="640,498 1100,526 1100,614" fill="#2ee86b"/>
+      <polygon points="640,498 1100,614 1100,702" fill="#19c3ff"/>
+      <polygon points="640,498 1100,702 1100,790" fill="#4d5cff"/>
+      <polygon points="640,498 1100,790 1100,878" fill="#c04dff"/>
+    </g>
+  </g>
+  <!-- incoming white beam -->
+  <polygon points="-40,845 -40,885 360,640 360,590" fill="#fff" opacity=".35" filter="url(#b26)"/>
+  <polygon points="-40,858 -40,880 360,629 360,606" fill="url(#inbeam)" filter="url(#b3)"/>
+  <!-- prism: glass triangle -->
+  <path d="M300 230 L300 794 L800 512 Z" fill="#6c7cff" opacity=".28" filter="url(#b26)" stroke="#6c7cff" stroke-width="40" stroke-linejoin="round"/>
+  <path d="M300 230 L300 794 L800 512 Z" fill="url(#glass)" stroke="url(#edge)" stroke-width="56" stroke-linejoin="round"/>
+</g>
+</svg>
