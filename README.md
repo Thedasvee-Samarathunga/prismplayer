@@ -1,6 +1,17 @@
-# Prism Player
+<table>
+  <tr align="center">
+    <td>
+      <img src="build/icon.png" width="70" alt="Prism Player Icon">
+    </td>
+    <td>
+      <h1>Prism Player</h1>
+    </td>
+  </tr>
+</table>
 
-A foobar2000-style music player whose whole interface takes its colours from the album that is playing.
+<hr>
+
+A foobar2000 inspired music player whose whole interface takes its colours from the album that is playing.
 
 * **Formats:** MP3, FLAC, AAC/M4A, ALAC, WAV, AIFF, OGG Vorbis, Opus, **DSD (DSF/DFF)**, WavPack, APE, WMA, TTA, Musepack, MP2, MKA and more.
   Everything is decoded by ffmpeg into one continuous stream. DSD is converted to PCM (176.4 kHz where the output allows it); there is no native DSD / DoP output.
