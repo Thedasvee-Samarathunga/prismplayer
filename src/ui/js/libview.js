@@ -6,7 +6,8 @@ import { VList } from './vlist.js';
 import { escapeHtml } from './fmt.js';
 import { ICON } from './icons.js';
 import { openMenu } from './menus.js';
-import { playTracks, playSingle, enqueue, enqueueNew, revealTrack } from './actions.js';
+import { playTracks, playSingle, enqueue, enqueueNew, revealTrack, editTags, downloadArt } from './actions.js';
+import { warmSelection } from './playback.js';
 
 let rows = [], tree = [], selKey = null, vl;
 let filterTimer = 0;
@@ -39,7 +40,8 @@ function render(node, i) {
   if (node._sig === sig) return;
   node._sig = sig;
   const tw = r.expandable ? `<span class="twisty">${ICON.caret}</span>` : '<span class="twisty"></span>';
-  const thumb = r.kind === 'album' ? `<img class="thumb" loading="lazy" decoding="async" alt="" src="${api.coverUrl(r.cover, 48)}">` : '';
+  // (no loading="lazy": the list only ever holds the rows in view, and a lazy picture waits for the browser's own idea of "near")
+  const thumb = r.kind === 'album' ? `<img class="thumb" decoding="async" alt="" src="${api.coverUrl(r.cover, 48)}">` : '';
   const trn = r.kind === 'track' ? `<span class="trn">${r.track || ''}</span>` : '';
   const cnt = r.kind === 'track' ? '' : `<span class="cnt">(${r.count})</span>`;
   node.innerHTML = `${r.kind === 'root' ? '' : tw}${thumb}${trn}<span class="lbl">${escapeHtml(r.label)}</span>${cnt}`;
@@ -48,6 +50,7 @@ function render(node, i) {
 function select(i, { scroll = true } = {}) {
   if (i < 0 || i >= rows.length) return;
   selKey = rows[i].key;
+  if (rows[i].ids && rows[i].ids.length) warmSelection(rows[i].ids[0]);                       // the first song of what you selected is probably what you play next
   vl.refresh();
   if (scroll) vl.scrollTo(i);
 }
@@ -74,7 +77,7 @@ function contextMenu(e, i) {
     { label: 'Play', action: () => activate(i) },
     { label: 'Add to current playlist', action: () => enqueue(r.ids) },
     { label: 'Add to new playlist', action: () => enqueueNew(r.ids, label.slice(0, 40)) },
-    ...(r.ids.length ? [{ sep: true }, { label: 'Open containing folder', action: () => revealTrack(r.ids[0]) }] : []),
+    ...(r.ids.length ? [{ sep: true }, { label: 'Edit metadata…', action: () => editTags(r.ids) }, { label: 'Download album art', action: () => downloadArt(r.ids[0]) }, { label: 'Open containing folder', action: () => revealTrack(r.ids[0]) }] : []),
     ...(r.expandable ? [{ label: r.expanded ? 'Collapse' : 'Expand', action: () => toggle(i) }] : []),
   ], e.clientX, e.clientY);
 }
@@ -129,6 +132,7 @@ export function initLibraryView() {
   });
 
   on('library', () => rebuild());
+  on('coverrev', () => { for (const n of vl.nodes.values()) n._sig = ''; vl.refresh(); });         // art changed: the pictures in the list are asked for again
   rebuild(false);
   return { focusFilter() { filter.focus(); filter.select(); }, rebuild };
 }

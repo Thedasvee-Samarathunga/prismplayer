@@ -73,6 +73,7 @@ export function initSideView() {
   on('nowplaying', ({ track }) => show(track));
   on('stats', ({ id }) => { if (shown && shown.id === id) show(shown); });
   on('lfstats', () => { if (shown) show(shown); });
+  on('coverrev', () => { if (shown) show(shown); });                                         // art changed: ask for the picture again
   on('library', () => { if (shown && S.tracks.has(shown.id)) show(S.tracks.get(shown.id)); });
   // with nothing playing, show whatever is selected in the playlist
   on('select', ({ track }) => { if (!P.cur && track) show(track); });

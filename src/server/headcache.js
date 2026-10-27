@@ -8,7 +8,7 @@ const { DiskCache } = require('./cache');
 const { Decoder, BYTES_PER_FRAME, HEAD_SECONDS, headFrames } = require('./feeder');
 
 class HeadCache {
-  constructor(dir, maxBytes, { minLatencyMs = 250, minSizeBytes = 30 << 20 } = {}) {
+  constructor(dir, maxBytes, { minLatencyMs = 120, minSizeBytes = 8 << 20 } = {}) {
     this.disk = new DiskCache(dir, maxBytes);
     this.minLatency = minLatencyMs; this.minSize = minSizeBytes;
     this.stats = { hits: 0, misses: 0, stored: 0, prefetched: 0, prefetchFailed: 0 };
@@ -16,7 +16,7 @@ class HeadCache {
     this.inflight = new Map();
     this._chain = Promise.resolve();
   }
-  key(track, rate) { return `${track.id}|${track.mtime}|${track.size}|${rate}|${HEAD_SECONDS}|h1`; }
+  key(track, rate) { return `${track.id}|${track.mtime}|${track.size}|${track.cueStart || 0}|${rate}|${HEAD_SECONDS}|h2`; }
   async get(track, rate) {
     if (!this.enabled) return null;
     const buf = await this.disk.get(this.key(track, rate), 'f32');

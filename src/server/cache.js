@@ -27,7 +27,8 @@ class DiskCache {
     try {
       const buf = await fs.promises.readFile(path.join(this.dir, n));
       e.at = Date.now();
-      const t = new Date(); fs.promises.utimes(path.join(this.dir, n), t, t).catch(() => {});
+      // the "last used" time is also written to the file now and then (the order of use survives a restart), but not on every read: a list of 40 thumbnails would be 40 extra disk writes
+      if (!e.touched || e.at - e.touched > 10 * 60 * 1000) { e.touched = e.at; const t = new Date(); fs.promises.utimes(path.join(this.dir, n), t, t).catch(() => {}); }
       return buf;
     } catch (_) { this._drop(n); return null; }
   }

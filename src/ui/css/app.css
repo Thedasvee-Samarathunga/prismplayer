@@ -238,7 +238,7 @@ select option { background: var(--panel); color: var(--fg); }
 .btn.primary { background: var(--accent); color: var(--on-accent); border-color: transparent; }
 .btn.danger { color: var(--fg); }
 .btn[disabled] { opacity: .5; pointer-events: none; }
-.tabs-inline { display: flex; gap: 4px; padding: 0 20px; border-bottom: 1px solid var(--border); }
+.tabs-inline { display: flex; flex-wrap: wrap; gap: 2px 4px; padding: 0 20px; border-bottom: 1px solid var(--border); }
 .tabs-inline .tab { border-radius: 9px 9px 0 0; }
 .field { display: flex; flex-direction: column; gap: 5px; margin: 12px 0; }
 .field label, .field .lab { color: var(--dim); font-weight: 600; font-size: 11.5px; }
@@ -610,3 +610,24 @@ html[data-square="1"] .vz-grip::after { border-radius: 0 !important; }
 /* frosted glass (dark): a soft light edge; the panels are translucent colours over the pre-blurred window picture (no backdrop-filter) */
 html[data-look="glass"] .panel { border-color: color-mix(in srgb, #fff 16%, var(--border)); box-shadow: 0 8px 30px rgba(0, 0, 0, .28), inset 0 1px 0 rgba(255, 255, 255, .10); }
 html[data-look="glass"] .menu, html[data-look="glass"] .modal { border-color: color-mix(in srgb, #fff 16%, var(--border)); box-shadow: 0 24px 70px rgba(0, 0, 0, .5); }
+
+/* ------------------------------------------------------------------ tag editor (Edit metadata) */
+.tag-ed { display: flex; flex-direction: column; gap: 10px; }
+.tg-grid { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 8px 12px; align-items: center; }
+.tg-grid label { color: var(--dim); font-weight: 600; font-size: 11.5px; }
+.tg-grid label.off { opacity: .45; }
+.tg-grid input, .tg-grid textarea { background: var(--panel2); border: 1px solid var(--border); border-radius: 9px; padding: 8px 10px; user-select: text; width: 100%; outline: none; resize: vertical; min-width: 0; }
+.tg-grid input:focus, .tg-grid textarea:focus { border-color: var(--accent); }
+.tg-grid input.mixed::placeholder { color: var(--dim); font-style: italic; opacity: 1; }
+.tg-grid input:disabled { opacity: .45; }
+.tg-pair { display: flex; align-items: center; gap: 8px; }
+.tg-pair input { width: 76px; flex: 0 0 76px; }
+.tg-pair span { color: var(--dim); font-weight: 600; }
+.tg-path { overflow-wrap: anywhere; user-select: text; color: var(--dim); }
+.tg-warn:empty { display: none; }
+/* ------------------------------------------------------------------ settings > cache */
+.cache-list { display: flex; flex-direction: column; gap: 4px; margin: 8px 0; }
+.cache-row { display: grid; grid-template-columns: 172px minmax(0, 1fr) 64px; gap: 10px; align-items: center; padding: 6px 10px; border-radius: 10px; background: var(--panel2); }
+.cache-row b { font-weight: 700; }
+.cache-row span { color: var(--dim); font-size: 11.5px; font-weight: 600; }
+.cache-row .btn { padding: 4px 11px; font-size: 11.5px; }

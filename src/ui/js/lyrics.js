@@ -8,7 +8,8 @@ import { fmtTime, escapeHtml, displayArtist } from './fmt.js';
 import { ICON } from './icons.js';
 import { indexAt, stateOf, sourceLabel } from './lyriclogic.js';
 import { toast } from './dialogs.js';
-import { bakeBlur } from './backdrop.js';
+import { loadBackdrop } from './backdrop.js';
+import { styleOf } from './theme.js';
 
 export const LY = { track: null, data: null, state: 'idle', error: '' };   // idle | loading | lines | none | instrumental | error
 const views = new Set();
@@ -161,8 +162,8 @@ function setFsMeta(track) {
   if (fsEls.root.dataset.cover !== url) {
     fsEls.root.dataset.cover = url;
     fsEls.root.classList.add('no-art');
-    // the slightly blurred, darkened background is made once on a small canvas (a 192 px version stretched over the screen), not by a screen-sized CSS blur filter
-    bakeBlur(url, { size: 96, saturate: 1.2, brightness: 0.62 }).then((baked) => {
+    // the slightly blurred, darkened background is made once by the server (a 1536 px picture, kept on disk), not by a screen-sized CSS blur filter
+    loadBackdrop(track, { mode: 'full', amount: styleOf(S.settings).blurAmount, sat: 1.2, bright: 0.62 }).then((baked) => {
       if (fsEls.root.dataset.cover !== url) return;
       if (!baked) { fsEls.bg.style.backgroundImage = ''; fsEls.cover.removeAttribute('src'); return; }
       fsEls.bg.style.backgroundImage = `url("${baked}")`; fsEls.cover.src = url; fsEls.root.classList.remove('no-art');
@@ -242,6 +243,8 @@ export function initLyrics({ slider }) {
   on('engine:time', () => { if (wanted() && P.state !== 'playing') kick(); });
   on('settings', () => { if (wanted() && LY.track) loadLyrics(LY.track); });         // e.g. online lookup switched on/off
   on('theme', () => {});
+  on('coverrev', () => { if (fsOpen && P.cur) { fsEls.root.dataset.cover = ''; setFsMeta(P.cur.track); } });
+  on('settings', () => { if (fsOpen && P.cur) { fsEls.root.dataset.cover = ''; setFsMeta(P.cur.track); } });        // (the blur strength may have changed)
   applyLyricsLayout();
   if (S.layout.lyrics) ensureLoaded();
 }

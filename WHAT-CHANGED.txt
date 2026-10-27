@@ -1,1 +1,5 @@
-Prism 2.0.3: Frosted glass + Frosted pastel are back (no blur filters). Apply on top of 2.0.2: copy this folder over your repo and commit. 7 files.
+Prism 2.1.0. Apply on top of 2.0.3: unzip over the repo (it contains binary icon files) and commit.
+- Blurred album cover background is back as an option (Settings > Appearance), made once by the server, high quality, also behind the fullscreen lyrics.
+- New icon (build/icon.ico + build/installer.ico + build/icon.png made from your artwork) and a build check that the INSTALLED exe + shortcuts show it.
+- Caching all over: covers, thumbnails, track starts, static files, Last.fm recap. Settings > Cache.
+- Edit metadata (songs or whole albums) and optional automatic album art download (Settings > Album art).

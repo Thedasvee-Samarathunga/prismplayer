@@ -6,7 +6,8 @@ import { escapeHtml } from './fmt.js';
 import { PERIOD_LABELS, summaryCard, streakCard, statCards, topList, albumGrid, trendsView, calendarHeat, weekHourHeat, highlights, artistOfMonth, chartsView, genresView, recentList, messageCard, setupCard, flameIcon, nf } from './recapviews.js';
 import { toast } from './dialogs.js';
 
-let root = null, open = false, period = 'overall', loadToken = 0, pollTimer = 0;
+let root = null, open = false, period = 'overall', loadToken = 0, pollTimer = 0, quietTimer = 0, quietTries = 0;
+const periodCache = new Map();                                    // period -> { summary, genres }: switching back to a period shows it at once, then refreshes quietly
 const view = { hist: null, status: null, info: null, summary: null, genres: null, charts: null, errors: {} };
 const $ = (sel) => root.querySelector(sel);
 
@@ -50,7 +51,11 @@ function build() {
     bar.appendChild(b);
   }
   $('#rc-close').addEventListener('click', () => closeRecap());
-  $('#rc-refresh').addEventListener('click', () => { startSync(false); loadApi(true); });
+  $('#rc-refresh').addEventListener('click', async () => {
+    startSync(false);
+    await api.post('/api/cache/clear', { what: 'lastfm' }).catch(() => {});                // Refresh really asks Last.fm again (the saved answers are dropped; the scrobble history is not)
+    periodCache.clear(); loadApi(true);
+  });
   root.addEventListener('mousedown', (e) => { if (e.target === root) closeRecap(); });
   root.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.stopPropagation(); closeRecap(); } });
   $('#rc-body').addEventListener('click', (e) => {
@@ -161,7 +166,12 @@ async function loadApi(force) {
   if (g && g.__error) view.genres = { genres: [], basedOn: 0 };
   if (c && c.__error) view.charts = { weeks: [], series: [] };
   void bad;
+  if (view.summary && !view.fatal) periodCache.set(period, { summary: view.summary, genres: view.genres });
   render();
+  // the server answered from its saved copy and is refreshing it in the background: ask once or twice more a moment later (quietly, nothing is blanked)
+  const refreshing = [view.summary, view.genres, view.charts].some((x) => x && x.refreshing);
+  clearTimeout(quietTimer);
+  if (refreshing && open && quietTries < 2) { quietTries++; quietTimer = setTimeout(() => { if (open) loadApi(false); }, 2800); }
 }
 async function loadAll() {
   await loadHistory(); render(); paintSync();
@@ -169,7 +179,9 @@ async function loadAll() {
 }
 async function setPeriod(p) {
   if (p === period) return;
-  period = p; view.summary = null; view.genres = null; render();
+  period = p; quietTries = 0;
+  const c = periodCache.get(p);
+  view.summary = c ? c.summary : null; view.genres = c ? c.genres : null; render();
   await loadApi(false);
 }
 
@@ -178,13 +190,15 @@ export function openRecap() {
   if (!root) build();
   open = true; root.hidden = false; document.body.classList.add('recap-open');
   root.querySelector('#rc-close').focus();
-  view.fatal = null;
-  $('#rc-body').innerHTML = '<div class="rc-grid12"><section class="rc-card rc-wide"><h3>Loading your recap…</h3></section></div>';
+  view.fatal = null; quietTries = 0;
+  // what was shown last time is shown again AT ONCE (it is kept in memory and, on the server, on disk); fresh numbers replace it as they arrive
+  if (view.hist || view.summary) render();
+  else $('#rc-body').innerHTML = '<div class="rc-grid12"><section class="rc-card rc-wide"><h3>Loading your recap…</h3></section></div>';
   loadAll();
 }
 export function closeRecap() {
   if (!root) return;
-  open = false; root.hidden = true; document.body.classList.remove('recap-open'); clearTimeout(pollTimer);
+  open = false; root.hidden = true; document.body.classList.remove('recap-open'); clearTimeout(pollTimer); clearTimeout(quietTimer);
   refreshChip();
 }
 export const isRecapOpen = () => open;

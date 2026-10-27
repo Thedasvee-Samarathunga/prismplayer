@@ -42,6 +42,13 @@ export function techLine(t) {
   return parts.join(' | ');
 }
 
+// The formats whose tags Prism can write (the server checks again): MP3, FLAC and M4A are edited in place without touching the audio; Ogg / Opus / WAV / AIFF / MKA / WMA through ffmpeg.
+const EDITABLE = new Set(['.mp3', '.flac', '.m4a', '.m4b', '.mp4', '.ogg', '.oga', '.opus', '.wav', '.wave', '.aif', '.aiff', '.aifc', '.mka', '.wma']);
+export function canEditTags(t) {
+  if (!t || t.cue || t.hidden || t.offline) return false;
+  const m = /\.[^.\\/]+$/.exec(t.path || '');
+  return !!m && EDITABLE.has(m[0].toLowerCase());
+}
 export function displayArtist(t) { return t.artist || t.albumArtist || 'Unknown Artist'; }
 export function displayAlbum(t) { return t.album || '[no album]'; }
 export function escapeHtml(s) {

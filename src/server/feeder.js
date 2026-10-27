@@ -10,7 +10,7 @@ const BYTES_PER_FRAME = 8;            // float32 x 2 channels
 const CHUNK_BYTES = 4096 * BYTES_PER_FRAME;
 const PRELOAD_BEFORE_END_S = 6;
 const GRACE_MS = 500;
-const HEAD_SECONDS = 12;                                   // how much of a track's start the head cache keeps (see headcache.js)
+const HEAD_SECONDS = 8;                                    // how much of a track's start the head cache keeps (see headcache.js). 8 s is plenty (the real decoder is running long before) and keeps the cache small
 const headFrames = (rate) => Math.round(rate * HEAD_SECONDS);
 
 function decoderArgs(track, startSec, rate, extraFilters) {
@@ -113,7 +113,12 @@ async function* feedRaw(opts) {
       const dec = cur.dec;
       const preloadAtFrame = Math.max(0, Math.round((track.duration - startedAt - PRELOAD_BEFORE_END_S) * rate));
       let produced = 0, skip = 0;
-      const rec = [], recWant = headFrames(rate); let recFrames = 0;
+      const rec = [], recWant = headFrames(rate); let recFrames = 0, headStored = false;
+      // The start of the track is kept as soon as it has been heard (not when the track ends): a track you skip after ten seconds is exactly the kind you will play again.
+      const storeHead = () => {
+        if (headStored) return; headStored = true;
+        if (heads && !head && !fromPre && recFrames && heads.shouldStore(track, dec.firstAt ? dec.firstAt - dec.t0 : 0)) heads.put(track, rate, Buffer.concat(rec)).catch(() => {});
+      };
       const maybePreload = () => {
         if (!pre && produced >= preloadAtFrame) {
           const n = getNext();
@@ -140,11 +145,12 @@ async function* feedRaw(opts) {
         if (heads && !head && !fromPre && !(startedAt > 0) && recFrames < recWant) {
           const take = Math.min(buf.length / BYTES_PER_FRAME, recWant - recFrames);
           rec.push(Buffer.from(buf.subarray(0, take * BYTES_PER_FRAME))); recFrames += take;
+          if (recFrames >= recWant) storeHead();
         }
         maybePreload();
         yield { k: 'pcm', buf: applyGain(buf, gain) };
       }
-      if (heads && !head && !fromPre && recFrames && heads.shouldStore(track, dec.firstAt ? dec.firstAt - dec.t0 : 0)) heads.put(track, rate, Buffer.concat(rec)).catch(() => {});
+      storeHead();
       const code = await dec.exited;
       if (produced === 0) {
         yield { k: 'error', track, tag: spec.tag, message: (dec.stderr.trim().split('\n').pop() || 'decoder produced no audio') + (code ? ` (exit ${code})` : '') };

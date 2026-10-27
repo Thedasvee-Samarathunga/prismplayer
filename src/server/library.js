@@ -47,6 +47,7 @@ class Library {
     this.status = { scanning: false, found: 0, processed: 0, total: 0, errors: 0, startedAt: 0, finishedAt: 0, roots: [] };
     this.rgStatus = { running: false, done: 0, total: 0, failed: 0 };
     this._scanPromise = null;
+    this.onScan = null;           // called after every finished scan (the server makes the album thumbnails ahead of time with it)
     this._watchers = [];
     this._timer = null;
     this._poll = null;
@@ -76,6 +77,21 @@ class Library {
     }
     return h;
   }
+
+  // ---- tag editing ---------------------------------------------------------------------------
+  // The file was rewritten with new tags and probed again (tags.js): this record replaces the old one (what the scan knows about the song - when it was added, its ReplayGain
+  // measurement - is kept). commit() saves and bumps the version once after a whole batch.
+  replaceTrack(id, rec) {
+    const old = this.tracks.get(id);
+    rec.added = (old && old.added) || Date.now();
+    if (old) {
+      rec.root = old.root; if (old.extra) rec.extra = true; if (old.offline) rec.offline = true;
+      if (old.rgScanned && rec.rgTrack == null) { rec.rgTrack = old.rgTrack; rec.rgTrackPeak = old.rgTrackPeak; rec.rgScanned = true; }
+    }
+    this.tracks.set(id, rec);
+    return rec;
+  }
+  commit() { this._persist(); }
 
   // ---- statistics ------------------------------------------------------------------------
   stats() { return this.statsStore.get(); }
@@ -118,6 +134,7 @@ class Library {
     if (this._scanPromise) { this._again = true; return this._scanPromise; }
     this._scanPromise = (async () => {
       do { this._again = false; await this._doScan(this._pendingFolders); } while (this._again);
+      if (this.onScan) { try { this.onScan(this.status); } catch (_) { /* never breaks a scan */ } }
       return this.status;
     })().finally(() => { this._scanPromise = null; });
     return this._scanPromise;

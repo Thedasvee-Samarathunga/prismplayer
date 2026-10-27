@@ -1,5 +1,5 @@
 // Toasts, modal dialogs, the folder/file browser and the settings dialog.
-import { api } from './api.js';
+import { api, bumpCoverRev } from './api.js';
 import { S, saveSettings, emit, loadLibrary, persist } from './state.js';
 import { engine } from './player.js';
 import { styleOf } from './theme.js';
@@ -180,11 +180,11 @@ export function settingsDialog({ onFoldersChanged, tab: startTab } = {}) {
   tabsHost.className = 'tabs-inline';
   const pane = document.createElement('div');
   wrap.append(tabsHost, pane);
-  const TABS = ['Library', 'Output', 'Playback', 'Appearance', 'Hotkeys', 'Lyrics', 'Cache', 'Scrobbling'];
+  const TABS = ['Library', 'Output', 'Playback', 'Appearance', 'Hotkeys', 'Lyrics', 'Album art', 'Cache', 'Scrobbling'];
   let tab = TABS.includes(startTab) ? startTab : 'Library', pollTimer = 0;
   const onCloseHooks = [];
 
-  const mod = modal({ title: 'Settings', body: wrap, width: '700px', buttons: [{ label: 'Close', primary: true }], onClose: () => { clearInterval(pollTimer); onCloseHooks.splice(0).forEach((f) => f()); } });
+  const mod = modal({ title: 'Settings', body: wrap, width: '780px', buttons: [{ label: 'Close', primary: true }], onClose: () => { clearInterval(pollTimer); onCloseHooks.splice(0).forEach((f) => f()); } });
   mod.body.style.padding = '0';
   pane.style.padding = '8px 20px 16px';
 
@@ -208,6 +208,7 @@ export function settingsDialog({ onFoldersChanged, tab: startTab } = {}) {
     if (tab === 'Appearance') return appearancePane();
     if (tab === 'Hotkeys') return hotkeysPane();
     if (tab === 'Lyrics') return lyricsPane();
+    if (tab === 'Album art') return artPane();
     if (tab === 'Cache') return cachePane();
     if (tab === 'Scrobbling') return scrobblePane();
     return playbackPane();
@@ -328,6 +329,10 @@ export function settingsDialog({ onFoldersChanged, tab: startTab } = {}) {
         <label class="choice"><input type="radio" name="ap-look" value="frost"><b>Frosted pastel</b><span>Light, see-through panels over the soft blurred album picture.</span></label>
       </div>
       <p class="note" id="ap-note"></p>
+      <div class="field" style="margin-top:20px"><span class="lab">Background</span></div>
+      <label class="check"><input type="checkbox" id="ap-blur"> Blurred album cover behind the window</label>
+      <div class="field"><label for="ap-blur-amt">Blur strength</label><select id="ap-blur-amt"><option value="0">Soft: the cover is still recognisable</option><option value="1">Medium</option><option value="2">Strong: only colours and light</option></select></div>
+      <p class="note" id="ap-blur-note">With this on, the Flat and Pastel looks get see-through panels over a high quality blurred copy of the album cover. The fullscreen lyrics show the same picture, with the same strength. It is made once per album and kept, so it costs the graphics card nothing while music plays. Black and white ignores it.</p>
       <div class="field" style="margin-top:20px"><span class="lab">Shape and layout</span></div>
       <label class="check"><input type="checkbox" id="ap-square"> Square corners (no rounded borders on any element)</label>
       <label class="check"><input type="checkbox" id="ap-sidefull"> Show a visualiser under the Now playing panel</label>
@@ -346,6 +351,8 @@ export function settingsDialog({ onFoldersChanged, tab: startTab } = {}) {
       pane.querySelectorAll('input[name=ap-look]').forEach((r) => { r.checked = r.value === st.look; });
       q('#ap-looks').querySelectorAll('.choice').forEach((c) => c.classList.toggle('disabled', st.colors === 'mono'));
       q('#ap-note').textContent = st.colors === 'mono' ? 'Black and white is always flat.' : '';
+      q('#ap-blur').checked = st.blur === 'cover'; q('#ap-blur').disabled = st.colors === 'mono';
+      q('#ap-blur-amt').value = String(st.blurAmount); q('#ap-blur-amt').disabled = st.colors === 'mono';
       q('#ap-square').checked = !!st.square;
       q('#ap-sidefull').checked = !S.layout.sideFull; q('#ap-sidefull').disabled = !!S.layout.hideViz;
       q('#ap-vcount').value = String(S.layout.viz.length); q('#ap-vtop').checked = !!S.layout.vizTop; q('#ap-perf').value = st.perf;
@@ -356,6 +363,8 @@ export function settingsDialog({ onFoldersChanged, tab: startTab } = {}) {
     }));
     pane.querySelectorAll('input[name=ap-look]').forEach((r) => r.addEventListener('change', async () => { await saveSettings({ appearance: { look: r.value } }); paint(); }));
     q('#ap-perf').addEventListener('change', async (e) => { await saveSettings({ appearance: { perf: e.target.value } }); paint(); });
+    q('#ap-blur').addEventListener('change', async (e) => { await saveSettings({ appearance: { blur: e.target.checked ? 'cover' : 'off' } }); paint(); });
+    q('#ap-blur-amt').addEventListener('change', async (e) => { await saveSettings({ appearance: { blurAmount: Number(e.target.value) } }); paint(); });
     q('#ap-square').addEventListener('change', async (e) => { await saveSettings({ appearance: { square: e.target.checked } }); paint(); });
     q('#ap-vcount').addEventListener('change', (e) => { vizApi.setCount(Number(e.target.value)); paint(); });
     q('#ap-vtop').addEventListener('change', (e) => { vizApi.setTop(e.target.checked); paint(); });
@@ -363,38 +372,73 @@ export function settingsDialog({ onFoldersChanged, tab: startTab } = {}) {
     q('#ap-sidefull').addEventListener('change', (e) => { S.layout.sideFull = !e.target.checked; persist(); document.getElementById('main').classList.toggle('side-full', !!S.layout.sideFull); emit('layout'); });
   }
 
+  // ---- album art (download)
+  function artPane() {
+    const a = S.settings.art || {};
+    pane.innerHTML = `
+      <p class="note">Prism takes the cover from the song's own tags, then from a picture in the album's folder (cover.jpg, folder.jpg ...). An album that has neither can get one from the internet.</p>
+      <label class="check" style="margin-top:12px"><input type="checkbox" id="ar-auto"> Download missing album art automatically</label>
+      <p class="note">Sources, in this order: <b>MusicBrainz / Cover Art Archive</b>, <b>Deezer</b>, <b>iTunes</b>. Only the <b>artist and album names</b> are sent. The pictures are kept in Prism's own folder: your music files are not changed. When you switch this on, Prism also goes through the albums of your library that have no picture (slowly, in the background, one request at a time, because MusicBrainz asks for that). A cover that was not found is not asked for again for 30 days.</p>
+      <label class="check"><input type="checkbox" id="ar-folder"> Also save the picture as cover.jpg in the album's folder (only when the folder has no picture yet)</label>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px"><button class="btn" id="ar-scan" type="button">Find art for albums without art now</button><button class="btn" id="ar-clear" type="button">Forget downloaded art</button></div>
+      <div id="ar-status" class="status-pill"><i></i><span>Reading…</span></div>
+      <p class="note">You can look for one album's cover at any time: right-click a song or an album › <b>Download album art</b>, or open <b>Edit metadata › Find album art</b>.</p>`;
+    const q = (x) => pane.querySelector(x);
+    q('#ar-auto').checked = !!a.auto; q('#ar-folder').checked = !!a.saveToFolder;
+    q('#ar-auto').addEventListener('change', async () => { await saveSettings({ art: { auto: q('#ar-auto').checked } }); upd(); });
+    q('#ar-folder').addEventListener('change', () => saveSettings({ art: { saveToFolder: q('#ar-folder').checked } }));
+    q('#ar-scan').addEventListener('click', async () => { try { const r = await api.post('/api/art/scan', {}); toast(r.queued ? `Looking for the covers of ${r.queued} album${r.queued === 1 ? '' : 's'}…` : 'Every album already has a picture (or was tried recently).', { ms: 3000 }); } catch (e) { toast(e.message, { error: true }); } upd(); });
+    q('#ar-clear').addEventListener('click', async () => { await api.post('/api/cache/clear', { what: 'art' }); bumpCoverRev(); emit('coverrev'); upd(); });
+    let lastFound = -1;
+    const upd = async () => {
+      try {
+        const s = await api.get('/api/art/status'), el = q('#ar-status'); if (!el) return;
+        const st = s.status;
+        el.className = 'status-pill ' + (st.running ? '' : 'ok');
+        el.querySelector('span').textContent = `${s.files} downloaded cover${s.files === 1 ? '' : 's'} (${mb(s.bytes)})` + (st.running ? ` · looking: ${st.lastAlbum || '…'} (${st.queued} waiting)` : ' · idle') + (st.checked ? ` · this session: ${st.found} found, ${st.missed} without result${st.failed ? `, ${st.failed} failed` : ''}` : '') + (st.lastError && st.failed ? ` · last problem: ${st.lastError}` : '');
+        if (lastFound >= 0 && st.found !== lastFound) { bumpCoverRev(); emit('coverrev'); }
+        lastFound = st.found;
+      } catch (_) { /* ignore */ }
+    };
+    upd(); pollTimer = setInterval(upd, 1500);
+  }
   // ---- cache
+  const mb = (b) => (b >= 1073741824 ? (b / 1073741824).toFixed(2) + ' GB' : b >= 1048576 ? (b / 1048576).toFixed(b < 10485760 ? 1 : 0) + ' MB' : Math.max(1, Math.round(b / 1024)) + ' KB');
   function cachePane() {
     const c = S.settings.cache || {};
     pane.innerHTML = `
-      <p class="note">Prism remembers things so they load faster, especially from hard disks and for big files:</p>
-      <ul class="note" style="margin:6px 0 6px 18px;padding:0;line-height:1.7">
-        <li><b>Track starts:</b> the first seconds of the tracks coming up next are decoded in advance and kept. When the track plays, sound starts at once while the file finishes opening. Only slow-to-open tracks (big files, slow disks, DSD) are kept.</li>
-        <li><b>Cover art and colours</b> are saved, so albums and themes appear instantly after a restart.</li>
-        <li>The start of the next tracks is also read into the system's file cache.</li>
-      </ul>
-      <label class="check" style="margin-top:12px"><input type="checkbox" id="ca-pre"> Prepare upcoming tracks in advance</label>
+      <p class="note">Prism remembers things so they come back fast, especially from hard disks and for big libraries. Everything here is only a copy: clearing it never touches your music, your library or your Last.fm history.</p>
+      <div class="cache-list" id="ca-list"><div class="note">Reading…</div></div>
+      <label class="check" style="margin-top:12px"><input type="checkbox" id="ca-pre"> Prepare upcoming tracks in advance (the first seconds of the next songs are decoded ahead, so they start at once)</label>
       <div class="field"><label for="ca-head">Track-start cache limit (MB)</label><input id="ca-head" type="text" inputmode="numeric"></div>
-      <div class="field"><label for="ca-cov">Cover-art cache limit (MB)</label><input id="ca-cov" type="text" inputmode="numeric"></div>
-      <div id="ca-stats" class="status-pill"><i></i><span>Reading cache size…</span></div>
-      <div style="display:flex;gap:10px;margin-top:8px;flex-wrap:wrap"><button class="btn" id="ca-clear" type="button">Clear the cache</button></div>
-      <p class="note">The cache only holds copies. Clearing it never touches your music or your library.</p>`;
+      <div class="field"><label for="ca-cov">Cover thumbnails limit (MB)</label><input id="ca-cov" type="text" inputmode="numeric"></div>
+      <div class="field"><label for="ca-bd">Blurred backgrounds limit (MB)</label><input id="ca-bd" type="text" inputmode="numeric"></div>
+      <div style="display:flex;gap:10px;margin-top:8px;flex-wrap:wrap"><button class="btn" id="ca-clear" type="button">Clear all caches</button></div>
+      <p class="note">Small things are remembered without a limit setting: colour palettes, lyrics answers (a week for "not found") and Last.fm answers (profile, top lists, charts, genres). Last.fm data is shown from this memory at once and refreshed in the background.</p>`;
     const q = (x) => pane.querySelector(x);
-    q('#ca-pre').checked = c.prefetch !== false; q('#ca-head').value = String(c.maxHeadMB || 1024); q('#ca-cov').value = String(c.maxCoverMB || 256);
-    const mb = (b) => (b >= 1048576 * 1024 ? (b / 1073741824).toFixed(2) + ' GB' : (b / 1048576).toFixed(b < 10485760 ? 1 : 0) + ' MB');
-    const save = () => saveSettings({ cache: { prefetch: q('#ca-pre').checked, maxHeadMB: Math.max(64, Math.min(20480, parseInt(q('#ca-head').value, 10) || 1024)), maxCoverMB: Math.max(16, Math.min(4096, parseInt(q('#ca-cov').value, 10) || 256)) } });
-    ['#ca-pre', '#ca-head', '#ca-cov'].forEach((id) => q(id).addEventListener('change', save));
+    q('#ca-pre').checked = c.prefetch !== false; q('#ca-head').value = String(c.maxHeadMB || 512); q('#ca-cov').value = String(c.maxCoverMB || 256); q('#ca-bd').value = String(c.maxBackdropMB || 160);
+    const save = () => saveSettings({ cache: { prefetch: q('#ca-pre').checked, maxHeadMB: Math.max(64, Math.min(20480, parseInt(q('#ca-head').value, 10) || 512)), maxCoverMB: Math.max(16, Math.min(4096, parseInt(q('#ca-cov').value, 10) || 256)), maxBackdropMB: Math.max(16, Math.min(4096, parseInt(q('#ca-bd').value, 10) || 160)) } });
+    ['#ca-pre', '#ca-head', '#ca-cov', '#ca-bd'].forEach((id) => q(id).addEventListener('change', save));
+    const clear = async (what) => { await api.post('/api/cache/clear', { what }); if (what === 'covers' || what === 'all' || what === 'art') { bumpCoverRev(); emit('coverrev'); } upd(); };
+    q('#ca-clear').addEventListener('click', () => clear('all'));
+    const rows = (s) => [
+      ['Track starts', `${s.heads.files} track${s.heads.files === 1 ? '' : 's'} · ${mb(s.heads.bytes)} of ${mb(s.heads.max)} · ${s.heads.hits} instant start${s.heads.hits === 1 ? '' : 's'} so far`, 'heads'],
+      ['Cover thumbnails', `${s.covers.thumbs.files} picture${s.covers.thumbs.files === 1 ? '' : 's'} · ${mb(s.covers.thumbs.bytes)} of ${mb(s.covers.thumbs.max)} · ${s.covers.mapped} song${s.covers.mapped === 1 ? '' : 's'} known${s.covers.fast ? ' · fast image engine' : ''}`, 'covers'],
+      ['Blurred backgrounds', `${s.covers.backdrops.files} · ${mb(s.covers.backdrops.bytes)} of ${mb(s.covers.backdrops.max)}`, null],
+      ['Colour palettes', `${s.palettes} album${s.palettes === 1 ? '' : 's'}`, 'palettes'],
+      ['Lyrics', `${s.lyrics.entries} answer${s.lyrics.entries === 1 ? '' : 's'}`, 'lyrics'],
+      ['Last.fm', `${s.lastfm.entries} saved answer${s.lastfm.entries === 1 ? '' : 's'} · history of ${s.lastfm.scrobbles.toLocaleString('en-US')} scrobbles kept separately`, 'lastfm'],
+      ['Downloaded album art', `${s.art.files} cover${s.art.files === 1 ? '' : 's'} · ${mb(s.art.bytes)}`, 'art'],
+    ];
     const upd = async () => {
       try {
-        const s = await api.get('/api/cache/stats'), el = q('#ca-stats'); if (!el) return;
-        el.className = 'status-pill ok';
-        el.querySelector('span').textContent = `Track starts: ${s.heads.files} (${mb(s.heads.bytes)}) · fast starts so far: ${s.heads.hits} · covers: ${s.covers.files} (${mb(s.covers.bytes)}) · colour palettes: ${s.palettes}`;
+        const s = await api.get('/api/cache/stats'), el = q('#ca-list'); if (!el) return;
+        el.innerHTML = rows(s).map(([n, d, what]) => `<div class="cache-row"><b>${escapeHtml(n)}</b><span>${escapeHtml(d)}</span>${what ? `<button class="btn" type="button" data-w="${what}">Clear</button>` : '<span></span>'}</div>`).join('');
+        el.querySelectorAll('button[data-w]').forEach((b) => b.addEventListener('click', () => clear(b.dataset.w)));
       } catch (_) { /* ignore */ }
     };
-    q('#ca-clear').addEventListener('click', async () => { await api.post('/api/cache/clear', { what: 'all' }); upd(); });
-    upd(); pollTimer = setInterval(upd, 2000);
+    upd(); pollTimer = setInterval(upd, 2500);
   }
-
   // ---- hotkeys
   function hotkeysPane() {
     const host = window.prismHost && window.prismHost.setGlobalHotkeys ? window.prismHost : null;

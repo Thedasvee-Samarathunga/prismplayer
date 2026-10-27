@@ -136,6 +136,16 @@ export async function loadLibrary() {
   emit('library');
 }
 
+/** Songs whose tags were changed on disk (the server sends the new records): the records are updated IN PLACE, so playlists and the playing song keep pointing at them. */
+export function applyTrackUpdates(updated, version) {
+  for (const rec of updated || []) {
+    const old = S.tracks.get(rec.id);
+    if (old) { for (const k of Object.keys(old)) delete old[k]; Object.assign(old, rec); }
+    else { S.tracks.set(rec.id, rec); S.list.push(rec); }
+  }
+  if (version) S.libVersion = version;
+  emit('library');
+}
 export async function loadAll() {
   const [settings, state, stats] = await Promise.all([api.settings(), api.state(), api.stats()]);
   S.settings = settings; S.stats = stats || {};

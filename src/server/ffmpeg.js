@@ -166,8 +166,9 @@ function normalizeProbe(p, file, stat) {
   let bitrate = parseInt(fmt.bit_rate || a.bit_rate || '0', 10) || 0;
   if (!bitrate && duration > 0 && stat) bitrate = Math.round((stat.size * 8) / duration);
 
-  const [trackNo, trackTotal] = parseOf(tags.track || tags.tracknumber);
-  const [discNo, discTotal] = parseOf(tags.disc || tags.discnumber);
+  const [trackNo, trackTotal0] = parseOf(tags.track || tags.tracknumber);
+  const [discNo, discTotal0] = parseOf(tags.disc || tags.discnumber);
+  const trackTotal = trackTotal0 || firstInt(tags.tracktotal || tags.totaltracks), discTotal = discTotal0 || firstInt(tags.disctotal || tags.totaldiscs);      // Vorbis comments keep the totals in their own fields
   const hasCover = streams.some((s) => s.codec_type === 'video' && s.disposition && s.disposition.attached_pic === 1);
 
   const nativeOk = NATIVE_CODECS.has(codecName) && NATIVE_EXT.has(ext) && channels <= 2 && sampleRate <= 192000;
@@ -226,6 +227,54 @@ async function limited(fn) {
 
 function extractEmbeddedCover(file, size) { return limited(() => extractEmbeddedCoverNow(file, size)); }
 function scaleImageFile(file, size) { return limited(() => scaleImageFileNow(file, size)); }
+// Runs ffmpeg with an image on stdin (a picture that was already read from a file by tags.js: no second look at the audio file) and collects stdout.
+function pipeImage(buf, args, timeoutMs = 20000) {
+  return new Promise((resolve) => {
+    const p = lowPriority(spawn(FFMPEG, args, { windowsHide: true, stdio: ['pipe', 'pipe', 'ignore'] }));
+    const chunks = []; let done = false;
+    const finish = (v) => { if (done) return; done = true; clearTimeout(t); resolve(v); };
+    const t = setTimeout(() => { try { p.kill('SIGKILL'); } catch (_) { /* gone */ } finish(null); }, timeoutMs);
+    p.stdout.on('data', (d) => chunks.push(d));
+    p.stdin.on('error', () => {});
+    p.on('error', () => finish(null));
+    p.on('close', () => { const b = Buffer.concat(chunks); finish(b.length > 100 ? b : null); });
+    p.stdin.end(buf);
+  });
+}
+/** A JPEG of the picture `buf` that is `size` px wide (null when ffmpeg cannot read it). */
+function scaleImageBuffer(buf, size) {
+  return pipeImage(buf, ['-v', 'error', '-i', 'pipe:0', '-vf', `scale=${size}:-2:flags=lanczos`, '-frames:v', '1', '-q:v', '3', '-f', 'mjpeg', 'pipe:1']);
+}
+// ---------------------------------------------------------------------------------------------
+// The blurred cover behind the window and behind the fullscreen lyrics (made once per cover and kept on disk, see covers.js).
+//   The cover is shrunk to a small square, blurred there (cheap, and a blur is just as smooth on a small picture), made more colourful, darkened and scaled up
+//   again (a smooth enlargement of an already blurred picture shows no blocks), then a little noise hides the banding that dark gradients show in 8 bits.
+//   The brightness is applied BEFORE the noise and a final clip keeps every channel at or below `bright` (the contrast guarantees of the colour engine are computed from that).
+// ---------------------------------------------------------------------------------------------
+const BACKDROP_SIGMA = { window: [9, 16, 26], full: [4, 7, 12] };           // blur strength at the small working size: soft / medium / strong
+function backdropFilter({ mode = 'window', amount = 1, sat = 1.5, bright = 0.55 } = {}) {
+  const full = mode === 'full';
+  const base = full ? 480 : 320, out = full ? 1536 : 1024;
+  const sigma = BACKDROP_SIGMA[full ? 'full' : 'window'][Math.max(0, Math.min(2, amount | 0))];
+  const b = Math.max(0.15, Math.min(1, bright)), cap = Math.max(1, Math.min(255, Math.floor(255 * b) - 6));       // 6 levels of room for the JPEG's own rounding
+  const lut = (e) => `lutrgb=r=${e}:g=${e}:b=${e}`;
+  return [
+    `scale=${base}:${base}:force_original_aspect_ratio=increase:flags=area`, `crop=${base}:${base}`, `gblur=sigma=${sigma}:steps=3`,
+    `hue=s=${Math.max(0.5, Math.min(2, sat))}`, 'format=rgb24', lut(`val*${b}`),
+    `scale=${out}:${out}:flags=bicubic`, 'noise=alls=2:allf=u', lut(`clip(val\\,0\\,${cap})`), 'format=yuvj420p',
+  ].join(',');
+}
+/** src = { buf } or { file }. Returns the JPEG (Buffer) or null. */
+function renderBackdrop(src, opts) {
+  const vf = backdropFilter(opts), tail = ['-vf', vf, '-frames:v', '1', '-q:v', '3', '-f', 'mjpeg', 'pipe:1'];
+  if (src.buf) return pipeImage(src.buf, ['-v', 'error', '-i', 'pipe:0', ...tail], 30000);
+  return new Promise((resolve) => {
+    const p = lowPriority(spawn(FFMPEG, ['-v', 'error', '-nostdin', '-i', src.file, ...tail], { windowsHide: true }));
+    const chunks = []; p.stdout.on('data', (d) => chunks.push(d)); p.on('error', () => resolve(null));
+    p.on('close', () => { const b = Buffer.concat(chunks); resolve(b.length > 100 ? b : null); });
+    setTimeout(() => { try { p.kill('SIGKILL'); } catch (_) { /* gone */ } }, 30000).unref();
+  });
+}
 
 function extractEmbeddedCoverNow(file, size) {
   return new Promise((resolve) => {
@@ -332,6 +381,6 @@ async function binariesOk() {
 
 module.exports = {
   lowPriority, FFMPEG, FFPROBE, AUDIO_EXT, MIME, isAudioFile, isCueFile, isImageFile, trackId,
-  probeRaw, normalizeProbe, probeTrack, scanReplayGain, extractEmbeddedCover, scaleImageFile, findFolderCover,
+  probeRaw, normalizeProbe, probeTrack, scanReplayGain, extractEmbeddedCover, extractEmbeddedCoverNow, scaleImageFile, scaleImageFileNow, scaleImageBuffer, renderBackdrop, backdropFilter, findFolderCover,
   transcodePlan, wavHeader, spawnPcm, binariesOk,
 };

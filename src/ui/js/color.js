@@ -156,10 +156,11 @@ export const BACKDROPS = {
   glass: { a: 0.6, max: 0.5, wash: 0.3 }, glassVivid: { a: 0.66, max: 0.56, wash: 0.26 },
   liquid: { a: 0.7, max: 0.42, wash: 0.25 }, liquidVivid: { a: 0.76, max: 0.48, wash: 0.2 },
   // flat / pastel with the background blur on (the cover is much more visible than in the plain looks, so the panels over it are see-through)
-  flatBlur: { a: 0.5, max: 0.6, wash: 0.12 }, flatBlurVivid: { a: 0.58, max: 0.66, wash: 0.08 },
-  pastelBlur: { a: 0.55, max: 1, wash: 0.42 }, pastelBlurVivid: { a: 0.62, max: 1, wash: 0.36 },
+  // (2.1.0: the cover shows a little more than in 2.0.0 and the panels are a little more see-through; checked on 1200 random palettes: every text colour still has >= 4.5:1 everywhere)
+  flatBlur: { a: 0.58, max: 0.62, wash: 0.1 }, flatBlurVivid: { a: 0.62, max: 0.66, wash: 0.08 },
+  pastelBlur: { a: 0.6, max: 1, wash: 0.36 }, pastelBlurVivid: { a: 0.66, max: 1, wash: 0.3 },
 };
-export const GLASS = { panel: 0.74, menu: 0.94, glass: 0.6, liquid: 0.42, mild: 0.8 };       // opacity of frosted panels / menus + dialogs
+export const GLASS = { panel: 0.74, menu: 0.94, glass: 0.6, liquid: 0.42, mild: 0.62 };       // opacity of frosted panels / menus + dialogs
 // per look: light surfaces (dark text) or dark surfaces (light text), and how see-through the panels are (1 = solid)
 export const LOOK_INFO = {
   flat: { light: false, glass: 1 }, pastel: { light: true, glass: 1 }, glass: { light: false, glass: GLASS.glass },

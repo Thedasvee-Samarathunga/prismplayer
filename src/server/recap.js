@@ -196,6 +196,8 @@ class RecapService {
     this.minGap = minGapMs; this.retryDelay = retryDelayMs; this.pageSize = pageSize; this.maxPages = maxPages; this.timeoutMs = timeoutMs;
     this.cache = new JsonStore(path.join(dataDir, 'recap-cache.json'), { v: 1, items: {} });
     this.cache.load();
+    if (!this.cache.get().items) this.cache.set({ v: 1, items: {} });
+    this._bg = new Map();                 // answers being refreshed in the background (stale-while-revalidate), one per question
     this.histStore = new JsonStore(path.join(dataDir, 'recap-history.json'), emptyHistory());
     this.hist = this.histStore.load();
     if (!this.hist || (this.hist.v !== 1 && this.hist.v !== 2) || !this.hist.days) { this.hist = emptyHistory(); this.histStore.set(this.hist); }
@@ -276,12 +278,21 @@ class RecapService {
     }
   }
 
-  // cached call: fresh cache wins; on network trouble an old copy is used (flagged stale)
-  async call(method, params, ttlMs, keyExtra = '') {
+  // cached call: fresh cache wins. With swrMs (stale-while-revalidate) an answer that is past its time but not older than swrMs is returned AT ONCE and refreshed in the
+  // background, so the recap opens instantly with what was saved and is up to date the next moment (the answer carries refreshing: true so the page asks again shortly).
+  // On network trouble an old copy is used (flagged stale).
+  async call(method, params, ttlMs, keyExtra = '', swrMs = 0) {
     const key = `${this.user()}|${method}|${JSON.stringify(params)}${keyExtra}`;
     const items = this.cache.get().items, hit = items[key];
     const nowMs = this.now();
     if (hit && (ttlMs === Infinity || nowMs - hit.at < ttlMs)) return { data: hit.data, stale: false, at: hit.at };
+    if (hit && swrMs > 0 && nowMs - hit.at < swrMs) {
+      if (!this._bg.has(key)) {
+        const job = this._fetch(method, Object.assign({}, params)).then((data) => { items[key] = { at: this.now(), data }; this._trim(); this.cache.saveSoon(); }, () => {}).finally(() => this._bg.delete(key));
+        this._bg.set(key, job);
+      }
+      return { data: hit.data, stale: false, at: hit.at, refreshing: true };
+    }
     try {
       const data = await this._fetch(method, Object.assign({}, params));
       items[key] = { at: nowMs, data };
@@ -295,30 +306,35 @@ class RecapService {
   }
   _trim() {
     const items = this.cache.get().items, keys = Object.keys(items);
-    if (keys.length <= 600) return;
+    if (keys.length <= 1500) return;
     keys.sort((a, b) => items[a].at - items[b].at);
-    for (const k of keys.slice(0, keys.length - 500)) delete items[k];
+    for (const k of keys.slice(0, keys.length - 1200)) delete items[k];
   }
+  /** what is kept for the recap, for the Cache settings */
+  cacheInfo() { const h = this.hist; return { entries: Object.keys(this.cache.get().items).length, scrobbles: h.total, updatedAt: h.updatedAt, user: h.user || '' }; }
+  /** forgets the downloaded Last.fm answers (tops, charts, genres, profile). The scrobble history file is NOT touched. */
+  clearCache() { this.cache.set({ v: 1, items: {} }); this.cache.saveNow(); this._an = null; }
 
   // ---------------------------------------------------------------- summary (tops, profile, loved, recent)
   async summary(period = 'overall') {
     this._need();
     if (!PERIODS.includes(period)) period = 'overall';
-    const u = this.user(), TTL = 10 * 60 * 1000;
-    const info = await this.call('user.getInfo', { user: u }, 6 * 3600 * 1000);
+    const u = this.user(), TTL = 30 * 60 * 1000;
+    const DAY = 24 * 3600 * 1000;
+    const info = await this.call('user.getInfo', { user: u }, 6 * 3600 * 1000, '', 14 * DAY);
     const settle = (p) => p.then((v) => v, (e) => { if (e instanceof RecapError && e.code === 6) throw e; return { error: e }; });
     const [ta, tal, tt, loved, rec] = await Promise.all([
-      settle(this.call('user.getTopArtists', { user: u, period, limit: 15 }, TTL)),
-      settle(this.call('user.getTopAlbums', { user: u, period, limit: 12 }, TTL)),
-      settle(this.call('user.getTopTracks', { user: u, period, limit: 15 }, TTL)),
-      settle(this.call('user.getLovedTracks', { user: u, limit: 1 }, 3600 * 1000)),
-      settle(this.call('user.getRecentTracks', { user: u, limit: 10 }, 60 * 1000)),
+      settle(this.call('user.getTopArtists', { user: u, period, limit: 15 }, TTL, '', 7 * DAY)),
+      settle(this.call('user.getTopAlbums', { user: u, period, limit: 12 }, TTL, '', 7 * DAY)),
+      settle(this.call('user.getTopTracks', { user: u, period, limit: 15 }, TTL, '', 7 * DAY)),
+      settle(this.call('user.getLovedTracks', { user: u, limit: 1 }, 3600 * 1000, '', 7 * DAY)),
+      settle(this.call('user.getRecentTracks', { user: u, limit: 10 }, 60 * 1000, '', 10 * 60 * 1000)),
     ]);
     const ui = info.data.user || {};
     const profile = { name: ui.name || u, realname: ui.realname || '', url: ui.url || '', registered: num(ui.registered && (ui.registered.unixtime || ui.registered['#text'])), playcount: num(ui.playcount),
       country: ui.country && ui.country !== 'None' ? ui.country : '', artistCount: num(ui.artist_count), albumCount: num(ui.album_count), trackCount: num(ui.track_count), image: image(ui.image) };
-    const out = { period, profile, errors: {}, stale: info.stale, at: info.at };
-    const mark = (k, r) => { if (r.error) out.errors[k] = r.error.message; else if (r.stale) out.stale = true; };
+    const out = { period, profile, errors: {}, stale: info.stale, at: info.at, refreshing: !!info.refreshing };
+    const mark = (k, r) => { if (r.error) out.errors[k] = r.error.message; else { if (r.stale) out.stale = true; if (r.refreshing) out.refreshing = true; } };
     mark('artists', ta); mark('albums', tal); mark('tracks', tt); mark('loved', loved); mark('recent', rec);
     const topA = ta.data && ta.data.topartists, topAl = tal.data && tal.data.topalbums, topT = tt.data && tt.data.toptracks;
     out.topArtists = arr(topA && topA.artist).map((a, i) => ({ rank: i + 1, name: a.name, plays: num(a.playcount), url: a.url || '' }));
@@ -336,10 +352,10 @@ class RecapService {
     this._need();
     if (!PERIODS.includes(period)) period = 'overall';
     const u = this.user();
-    const ta = await this.call('user.getTopArtists', { user: u, period, limit: 25 }, 10 * 60 * 1000);
+    const ta = await this.call('user.getTopArtists', { user: u, period, limit: 25 }, 30 * 60 * 1000, '', 7 * 24 * 3600 * 1000);
     const artists = arr(ta.data.topartists && ta.data.topartists.artist).map((a) => ({ name: a.name, plays: num(a.playcount) }));
-    const agg = new Map(); let weightTotal = 0, stale = ta.stale, failed = 0;
-    const tagLists = await Promise.all(artists.map((a) => this.call('artist.getTopTags', { artist: a.name }, 30 * 86400 * 1000).then((r) => { if (r.stale) stale = true; return r.data; }, () => { failed++; return null; })));
+    const agg = new Map(); let weightTotal = 0, stale = ta.stale, failed = 0, refreshing = !!ta.refreshing;
+    const tagLists = await Promise.all(artists.map((a) => this.call('artist.getTopTags', { artist: a.name }, 30 * 86400 * 1000, '', 365 * 86400 * 1000).then((r) => { if (r.stale) stale = true; if (r.refreshing) refreshing = true; return r.data; }, () => { failed++; return null; })));
     artists.forEach((a, i) => {
       const tags = arr(tagLists[i] && tagLists[i].toptags && tagLists[i].toptags.tag)
         .map((t) => ({ name: String(t.name || '').toLowerCase().trim(), count: num(t.count) }))
@@ -354,7 +370,7 @@ class RecapService {
     });
     const list = Array.from(agg.values()).sort((a, b) => b.weight - a.weight || (a.name < b.name ? -1 : 1)).slice(0, 12)
       .map((e) => ({ name: e.name, share: weightTotal ? Math.round((e.weight / weightTotal) * 1000) / 10 : 0, artists: e.artists.sort((x, y) => y.plays - x.plays).slice(0, 3).map((x) => x.name) }));
-    return { period, genres: list, basedOn: artists.length, failed, stale };
+    return { period, genres: list, basedOn: artists.length, failed, stale, refreshing };
   }
 
   // ---------------------------------------------------------------- weekly charts
@@ -362,16 +378,16 @@ class RecapService {
     this._need();
     weeks = Math.max(2, Math.min(26, Number(weeks) || 12));
     const u = this.user();
-    const lst = await this.call('user.getWeeklyChartList', { user: u }, 6 * 3600 * 1000);
+    const lst = await this.call('user.getWeeklyChartList', { user: u }, 6 * 3600 * 1000, '', 7 * 24 * 3600 * 1000);
     const ranges = arr(lst.data.weeklychartlist && lst.data.weeklychartlist.chart).map((c) => ({ from: num(c.from), to: num(c.to) })).sort((a, b) => a.from - b.from).slice(-weeks);
-    const rows = await Promise.all(ranges.map((r, idx) => this.call('user.getWeeklyArtistChart', { user: u, from: r.from, to: r.to }, idx === ranges.length - 1 ? 3600 * 1000 : Infinity)
-      .then((x) => ({ r, list: arr(x.data.weeklyartistchart && x.data.weeklyartistchart.artist).map((a) => ({ name: a.name, plays: num(a.playcount) })), stale: x.stale }), () => ({ r, list: [], failed: true }))));
+    const rows = await Promise.all(ranges.map((r, idx) => this.call('user.getWeeklyArtistChart', { user: u, from: r.from, to: r.to }, idx === ranges.length - 1 ? 3600 * 1000 : Infinity, '', idx === ranges.length - 1 ? 24 * 3600 * 1000 : 0)
+      .then((x) => ({ r, list: arr(x.data.weeklyartistchart && x.data.weeklyartistchart.artist).map((a) => ({ name: a.name, plays: num(a.playcount) })), stale: x.stale, refreshing: x.refreshing }), () => ({ r, list: [], failed: true }))));
     const totals = new Map();
     for (const row of rows) for (const a of row.list) totals.set(a.name, (totals.get(a.name) || 0) + a.plays);
     const top5 = Array.from(totals.entries()).sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1)).slice(0, 5).map((e) => e[0]);
     const weeksOut = rows.map((row) => ({ from: row.r.from, to: row.r.to, total: row.list.reduce((a, b) => a + b.plays, 0), top: row.list.slice().sort((a, b) => b.plays - a.plays).slice(0, 3), failed: !!row.failed }));
     const series = top5.map((name) => ({ name, values: rows.map((row) => { const f = row.list.find((a) => a.name === name); return f ? f.plays : 0; }) }));
-    return { weeks: weeksOut, series, stale: lst.stale || rows.some((r) => r.stale) };
+    return { weeks: weeksOut, series, stale: lst.stale || rows.some((r) => r.stale), refreshing: !!lst.refreshing || rows.some((r) => r.refreshing) };
   }
 
   // ---------------------------------------------------------------- scrobble history

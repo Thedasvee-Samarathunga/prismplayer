@@ -7,6 +7,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { URL } = require('url');
+const crypto = require('crypto');
 const ff = require('./ffmpeg');
 const { Library, normalizeFolders } = require('./library');
 const { feed } = require('./feeder');
@@ -16,6 +17,9 @@ const { DiskCache, warmFile } = require('./cache');
 const { HeadCache } = require('./headcache');
 const { LyricsService } = require('./lyrics');
 const { RecapService, RecapError } = require('./recap');
+const { CoverService } = require('./covers');
+const { ArtService, albumKey } = require('./art');
+const tags = require('./tags');
 const { spawn } = require('child_process');
 const { JsonStore } = require('./store');
 
@@ -23,13 +27,14 @@ const DEFAULT_SETTINGS = {
   folders: [],                 // [{path, enabled}] - the ONLY places Prism ever looks for music
   watchFolders: true,          // rescan automatically when files in those folders change
   dynamicColors: true,         // legacy switch: false = black & white
-  appearance: { colors: 'standard', look: 'flat', perf: 'balanced' },   // colors: standard | vivid | mono   look: flat | pastel (solid, always coloured from the album)   perf: visualiser quality smooth | balanced | light
+  appearance: { colors: 'standard', look: 'flat', perf: 'balanced', blur: 'cover', blurAmount: 1 },   // colors: standard | vivid | mono   look: flat | pastel | glass | frost   perf: visualiser quality smooth | balanced | light   blur: off | cover (the blurred album cover behind the window)   blurAmount: 0 soft | 1 medium | 2 strong
   replayGain: 'off',           // off | track | album
   rg: { preamp: 0, fallback: 0, preventClipping: true },
   output: { mode: 'web', webDeviceId: '', deviceId: '', matchRate: true, bits: 0, bufferMs: 0 },   // mode: web | exclusive | shared
   eq: { enabled: false, preamp: 0, gains: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], preset: 'Flat', autoPreamp: true },
   dj: { on: false, mode: 'all', genres: [], style: 'balanced', crossfade: 6 },      // the music DJ (ribbon): what to mix, how, and how long tracks overlap
-  cache: { prefetch: true, maxHeadMB: 1024, maxCoverMB: 256 },   // smart caching: pre-decoded track starts, cover thumbnails
+  cache: { prefetch: true, maxHeadMB: 512, maxCoverMB: 256, maxBackdropMB: 160 },   // smart caching: pre-decoded track starts, cover thumbnails, blurred backgrounds
+  art: { auto: false, saveToFolder: false },                // download missing album art (MusicBrainz / Cover Art Archive, Deezer, iTunes); saveToFolder = also write cover.jpg next to the music
   hotkeys: {},                 // action id -> key combination ('' = unassigned); see ui/js/hotkeys.js
   hotkeyGlobal: false,         // register the global ones system-wide (desktop app)
   recap: { user: '' },         // Last.fm user name for the recap (defaults to the connected scrobbling account)
@@ -115,21 +120,42 @@ async function startServer(opts) {
   const cacheDir = path.join(dataDir, 'cache');
   const MB = 1024 * 1024;
   const cs0 = (settingsStore.get().cache || {});
-  const heads = new HeadCache(path.join(cacheDir, 'heads'), Math.max(16, cs0.maxHeadMB || 1024) * MB, opts.headCache || {});
+  const heads = new HeadCache(path.join(cacheDir, 'heads'), Math.max(16, cs0.maxHeadMB || 512) * MB, opts.headCache || {});
   heads.enabled = cs0.prefetch !== false;
-  const covers = new DiskCache(path.join(cacheDir, 'covers'), Math.max(16, cs0.maxCoverMB || 256) * MB);
   const paletteStore = new JsonStore(path.join(cacheDir, 'palettes.json'), { items: {} });
   paletteStore.load();
-  const applyCacheSettings = () => { const c = settingsStore.get().cache || {}; heads.enabled = c.prefetch !== false; heads.setMax(Math.max(16, c.maxHeadMB || 1024) * MB); covers.setMax(Math.max(16, c.maxCoverMB || 256) * MB); };
   const getSettings = () => settingsStore.get();
+  // downloaded album art (an option) is the LAST place the cover service looks; art.js and covers.js know each other only through these two callbacks
+  const art = new ArtService({ dataDir, getSettings, roots: opts.artRoots || {}, minGapMs: opts.artGapMs, onFound: () => { covers.forgetMisses(); covers.clearMemory(); } });
+  const covers = new CoverService({ dir: cacheDir, maxBytes: Math.max(16, cs0.maxCoverMB || 256) * MB, backdropMaxBytes: Math.max(16, cs0.maxBackdropMB || 160) * MB, imageTools: opts.imageTools || null, artFor: (t) => art.fileFor(t) });
+  const applyCacheSettings = () => { const c = settingsStore.get().cache || {}; heads.enabled = c.prefetch !== false; heads.setMax(Math.max(16, c.maxHeadMB || 512) * MB); covers.setLimits(Math.max(16, c.maxCoverMB || 256) * MB, Math.max(16, c.maxBackdropMB || 160) * MB); };
   const saveSettings = (patch) => {
+    const prevArt = !!(settingsStore.get().art && settingsStore.get().art.auto);
     const next = deepMerge(settingsStore.get(), patch);
     next.folders = normalizeFolders(next.folders);
     settingsStore.set(next); settingsStore.saveNow();
     if (patch && ('folders' in patch || 'watchFolders' in patch)) applyFolders(patch && 'folders' in patch);
     if (patch && 'cache' in patch) applyCacheSettings();
+    if (patch && patch.art && !prevArt && next.art.auto) art.scanLibrary(library.list()).catch(() => {});           // just switched on: look for the albums that have no art, in the background
   };
   const watchOpts = { debounceMs: opts.watchDebounceMs || 3000, pollMs: opts.watchPollMs || 30000 };
+  // After a scan (a moment later, when nothing else is going on): make the small album thumbnails of the whole library in the background, so the list never waits for them,
+  // and (only when the option is on) look for art for albums that have none. Thumbnails are only made ahead when this app has fast image code (no process per picture).
+  let afterScanTimer = null;
+  library.onScan = () => {
+    clearTimeout(afterScanTimer);
+    afterScanTimer = setTimeout(() => {
+      try {
+        if (covers.fast || opts.prefetchCovers) {
+          const reps = new Map();                                                                  // one song per album (the first one that has a picture of its own)
+          for (const t of library.list()) { const k = t.album ? albumKey(t) : 'dir|' + path.dirname(t.path); const r = reps.get(k); if (!r || (!r.hasCover && t.hasCover)) reps.set(k, t); }
+          covers.prefetch(Array.from(reps.values()), 48);
+        }
+        if (art.cfg().auto) art.scanLibrary(library.list()).catch(() => {});
+      } catch (e) { console.error('[after scan]', e.message); }
+    }, opts.afterScanDelayMs == null ? 2500 : opts.afterScanDelayMs);
+    if (afterScanTimer.unref) afterScanTimer.unref();
+  };
   function applyFolders(rescan) {
     const st = settingsStore.get();
     library.watch(st.folders, Object.assign({ enabled: st.watchFolders !== false }, watchOpts));
@@ -145,7 +171,6 @@ async function startServer(opts) {
   native.on('event', (ev) => { const line = `data: ${JSON.stringify(ev)}\n\n`; for (const r of sseClients) r.write(line); });
   const streams = new Map();   // sid -> {next, close}
   let libJson = null, tsMemo = { key: '', body: null };
-  const coverCache = new Map(); // key -> {buf, type}
   let allowedHosts = new Set();
 
   // --------------------------------------------------------------------------- file serving
@@ -269,44 +294,24 @@ async function startServer(opts) {
   }
 
   // --------------------------------------------------------------------------- covers
-  // Covers are cached in memory (fast) and on disk (survives restarts, so a hard disk is not asked for the same picture twice).
-  const coverJobs = new Map();
-  async function coverFor(track, size) {
-    let key, loader, folderFile = null;
-    if (track.hasCover) {
-      key = `emb|${track.parentId || track.id}|${track.mtime}|${track.size}|${size || 0}`;      // the tracks of a cue sheet share the cover of their file
-      loader = () => ff.extractEmbeddedCover(track.path, size);
-    } else {
-      folderFile = await ff.findFolderCover(path.dirname(track.path));
-      if (!folderFile) return null;
-      if (!size) return { file: folderFile };
-      let st; try { st = await fs.promises.stat(folderFile); } catch (_) { return null; }
-      key = `dir|${folderFile}|${st.mtimeMs}|${st.size}|${size}`;
-      loader = () => ff.scaleImageFile(folderFile, size);
-    }
-    const mem = coverCache.get(key);
-    if (mem) return mem;
-    if (coverJobs.has(key)) return coverJobs.get(key);
-    const job = (async () => {
-      let buf = await covers.get(key, 'img');
-      if (!buf) { buf = await loader(); if (buf) covers.put(key, 'img', buf).catch(() => {}); }
-      if (!buf) return null;
-      const hit = { buf, type: sniffImage(buf) };
-      coverCache.set(key, hit);
-      if (coverCache.size > 300) coverCache.delete(coverCache.keys().next().value);
-      return hit;
-    })().finally(() => coverJobs.delete(key));
-    coverJobs.set(key, job);
-    return job;
-  }
-  async function serveCover(req, res, track, size) {
-    const r = await coverFor(track, size);
-    if (!r) return sendErr(res, 404, 'no cover');
-    if (r.file) return serveFile(req, res, r.file, IMG_MIME[path.extname(r.file).toLowerCase()] || 'image/jpeg');
-    res.writeHead(200, { 'Content-Type': r.type, 'Content-Length': r.buf.length, 'Cache-Control': 'private, max-age=3600' });
+  // The work is done by covers.js (fast extraction, thumbnails stored by picture, one queue that drops what nobody waits for any more). This part only talks HTTP:
+  // a picture is served with an ETag and a day of caching (the page puts a revision in the URL when art changes), and a request whose page went away is cancelled.
+  const COVER_SIZES = [32, 48, 64, 96, 128, 192, 256, 320, 400, 512, 640, 800, 1024, 1200];
+  const bucket = (n) => (n <= 0 ? 0 : (COVER_SIZES.find((b) => b >= n) || 1200));                  // fewer different sizes = more pictures shared
+  const requestSignal = (req, res) => { const ac = new AbortController(); res.on('close', () => { if (!res.writableEnded) ac.abort(); }); return ac.signal; };
+  function sendImage(req, res, r, { maxAge = 86400 } = {}) {
+    if (!r) { res.writeHead(404, { 'Content-Type': 'application/json', 'Cache-Control': 'private, max-age=300' }); return res.end('{"error":"no cover"}'); }
+    if (r.file) return serveFile(req, res, r.file, r.type || 'image/jpeg');
+    const etag = '"' + crypto.createHash('sha1').update(r.buf).digest('hex').slice(0, 16) + '"';
+    const head = { 'Content-Type': r.type, ETag: etag, 'Cache-Control': 'private, max-age=' + maxAge };
+    if (req.headers['if-none-match'] === etag) { res.writeHead(304, head); return res.end(); }
+    res.writeHead(200, Object.assign({ 'Content-Length': r.buf.length }, head));
+    if (req.method === 'HEAD') return res.end();
     res.end(r.buf);
   }
-
+  const serveCover = async (req, res, track, size) => sendImage(req, res, await covers.get(track, bucket(size), { signal: requestSignal(req, res) }));
+  const BACKDROP_OK = (q) => ({ mode: q.get('mode') === 'full' ? 'full' : 'window', amount: parseInt(q.get('amount') || '1', 10), sat: parseFloat(q.get('sat') || '1.5'), bright: parseFloat(q.get('b') || '0.55') });
+  const serveBackdrop = async (req, res, track, q) => sendImage(req, res, await covers.backdrop(track, BACKDROP_OK(q), { signal: requestSignal(req, res) }), { maxAge: 604800 });
   // ---- warming: start reading the beginning of tracks that are about to be played
   async function warmTracks(ids, { rate = 0, deep = false } = {}) {
     let warmedN = 0, queued = 0;
@@ -317,7 +322,7 @@ async function startServer(opts) {
         const r = rate || (native.dev ? native.dev.rate : 0) || (native.caps && native.caps.length ? native.rateFor(t) : 44100);
         heads.prefetch(t, r).catch(() => {}); queued++;
       }
-      coverFor(t, 128).catch(() => {});                       // the cover + theme of the next track are ready too
+      covers.get(t, 128, { pri: 1 }).catch(() => {});          // the cover + theme of the next track are ready too
     }
     return { requested: Math.min(ids.length, 4), prefetching: queued };
   }
@@ -389,10 +394,54 @@ async function startServer(opts) {
     if (!file.startsWith(path.normalize(uiDir))) return sendErr(res, 403, 'forbidden');
     fs.stat(file, (err, st) => {
       if (err || !st.isFile()) return sendErr(res, 404, 'not found');
-      res.writeHead(200, { 'Content-Type': STATIC_MIME[path.extname(file).toLowerCase()] || 'application/octet-stream', 'Content-Length': st.size, 'Cache-Control': 'no-cache' });
+      // "no-cache" = ask every time, but with an ETag the answer is a tiny 304 when nothing changed (the page's scripts, styles and fonts are not downloaded again at every start)
+      const etag = `W/"${st.size.toString(16)}-${Math.floor(st.mtimeMs).toString(16)}"`;
+      const head = { 'Content-Type': STATIC_MIME[path.extname(file).toLowerCase()] || 'application/octet-stream', 'Cache-Control': 'no-cache', ETag: etag };
+      if (req.headers['if-none-match'] === etag) { res.writeHead(304, head); return res.end(); }
+      res.writeHead(200, Object.assign({ 'Content-Length': st.size }, head));
       if (req.method === 'HEAD') return res.end();
       fs.createReadStream(file).pipe(res);
     });
+  }
+
+  // --------------------------------------------------------------------------- album art, tag editing, cache overview
+  // does this song's album have a picture anywhere (embedded, a file in its folder, or one downloaded earlier)?
+  async function needsArt(t) {
+    if (t.hasCover) return false;
+    if (await ff.findFolderCover(path.dirname(t.path))) return false;
+    if (await art.fileFor(t)) return false;
+    return true;
+  }
+  // Tags are written one file at a time (a second request waits for the first), and each write is checked afterwards (see tags.js). The library record is replaced by a fresh probe of the file.
+  let editChain = Promise.resolve();
+  function editTags(ids, changes) {
+    const run = async () => {
+      const results = [], updated = [];
+      for (const id of ids) {
+        const t = library.get(id);
+        if (!t) { results.push({ id, ok: false, error: 'unknown track' }); continue; }
+        if (t.cue || t.hidden) { results.push({ id, ok: false, code: 'cue', error: 'Songs from a cue sheet get their tags from the cue sheet.' }); continue; }
+        if (!tags.canEdit(t.path)) { results.push({ id, ok: false, code: 'unsupported', error: 'This file format cannot be edited.' }); continue; }
+        if (!fs.existsSync(t.path)) { results.push({ id, ok: false, code: 'missing', error: 'The file is not there (is the drive plugged in?).' }); continue; }
+        const edits = tags.normalizeChanges(changes, t);
+        if (!Object.keys(edits).length) { results.push({ id, ok: true, unchanged: true }); continue; }
+        try {
+          const r = await tags.writeTags(t.path, edits, t);
+          updated.push(library.replaceTrack(id, r.record));
+          covers.forgetTrack(t);
+          results.push({ id, ok: true, how: `${r.kind} ${r.wrote}` });
+        } catch (e) { results.push({ id, ok: false, code: e.code || 'write', error: e.message || 'could not write the tags' }); }
+        await new Promise((r) => setImmediate(r));
+      }
+      if (updated.length) library.commit();
+      return { results, tracks: updated, version: library.version };
+    };
+    const p = editChain.then(run, run);
+    editChain = p.catch(() => {});
+    return p;
+  }
+  function cacheSummary() {
+    return { heads: heads.summary(), covers: covers.summary(), palettes: Object.keys(paletteStore.get().items).length, lyrics: { entries: Object.keys(lyrics.cache.get().items).length }, lastfm: recap.cacheInfo(), art: art.summary() };
   }
 
   // --------------------------------------------------------------------------- router
@@ -402,6 +451,8 @@ async function startServer(opts) {
     const q = u.searchParams;
 
     if (!allowedHosts.has(req.headers.host)) return sendErr(res, 403, 'bad host');
+    const sfs = req.headers['sec-fetch-site'];                                      // browsers say where a request comes from: only Prism's own page (same-origin) or a direct visit (none) is served
+    if (sfs && sfs !== 'same-origin' && sfs !== 'none') return sendErr(res, 403, 'cross-site request');
     if (req.method !== 'GET' && req.method !== 'HEAD' && req.headers.origin && !allowedHosts.has(req.headers.origin.replace(/^https?:\/\//, ''))) return sendErr(res, 403, 'bad origin');
 
     if (!p.startsWith('/api/')) return serveStatic(req, res, p);
@@ -474,14 +525,17 @@ async function startServer(opts) {
         }
         return sendJson(res, { palette: paletteStore.get().items[k] || null });      // null = not measured yet (a normal answer, not an error)
       }
-      case '/api/cache/stats': return sendJson(res, { heads: heads.summary(), covers: covers.stats(), palettes: Object.keys(paletteStore.get().items).length });
+      case '/api/cache/stats': return sendJson(res, cacheSummary());
       case '/api/cache/clear': {
         if (req.method !== 'POST') return sendErr(res, 405, 'POST only');
         const b = await readBody(req), what = b.what || 'all';
         if (what === 'all' || what === 'heads') heads.clear();
-        if (what === 'all' || what === 'covers') { covers.clear(); coverCache.clear(); }
+        if (what === 'all' || what === 'covers') covers.clear();
         if (what === 'all' || what === 'palettes') { paletteStore.get().items = {}; paletteStore.saveNow(); }
-        return sendJson(res, { heads: heads.summary(), covers: covers.stats(), palettes: Object.keys(paletteStore.get().items).length });
+        if (what === 'all' || what === 'lyrics') { lyrics.cache.set({ v: 1, items: {} }); lyrics.cache.saveNow(); }
+        if (what === 'all' || what === 'lastfm') recap.clearCache();                    // the downloaded API answers only: the scrobble history itself is never deleted here
+        if (what === 'art') art.clear();
+        return sendJson(res, cacheSummary());
       }
       case '/api/lyrics': {
         const t = trackOr404(); if (!t) return;
@@ -548,6 +602,29 @@ async function startServer(opts) {
         const size = Math.min(1200, Math.max(0, parseInt(q.get('size') || '0', 10) || 0));
         return serveCover(req, res, t, size);
       }
+      case '/api/backdrop': {                       // the blurred cover behind the window ('window') or behind the fullscreen lyrics ('full'): made once per cover, kept on disk
+        const t = trackOr404(); if (!t) return;
+        return serveBackdrop(req, res, t, q);
+      }
+      case '/api/art/status': return sendJson(res, art.summary());
+      case '/api/art/ensure': {                     // (auto download) the song that just started has no picture anywhere: look for one now; resolves when the answer is known
+        if (req.method !== 'POST') return sendErr(res, 405, 'POST only');
+        const b = await readBody(req), t = library.get(b.id); if (!t) return sendErr(res, 404, 'unknown track');
+        if (!b.force && !art.cfg().auto) return sendJson(res, { found: false, skipped: true, reason: 'Automatic download is off.' });
+        if (await needsArt(t) === false) return sendJson(res, { found: false, skipped: true, reason: 'This album already has a picture.' });
+        const r = await art.lookup(t, { force: !!b.force });
+        return sendJson(res, { found: !!r.found, source: r.source || '', reason: r.reason || '' });
+      }
+      case '/api/art/scan': {
+        if (req.method !== 'POST') return sendErr(res, 405, 'POST only');
+        return sendJson(res, { queued: await art.scanLibrary(library.list()) });
+      }
+      case '/api/tags/edit': {                      // write tags into the files. { ids: [...], changes: { title, artist, album, albumArtist, year, genre, composer, comment, track, trackTotal, disc, discTotal } }
+        if (req.method !== 'POST') return sendErr(res, 405, 'POST only');
+        const b = await readBody(req, 1024 * 1024);
+        if (!Array.isArray(b.ids) || !b.ids.length || b.ids.length > 5000 || !b.changes || typeof b.changes !== 'object') return sendErr(res, 400, 'nothing to change');
+        return sendJson(res, await editTags(b.ids.filter((x) => typeof x === 'string'), b.changes));
+      }
       case '/api/browse':
         try { return sendJson(res, await browse(q.get('path') || '')); } catch (e) { return sendErr(res, 400, e.message); }
       case '/api/state':
@@ -589,7 +666,14 @@ async function startServer(opts) {
     });
   });
 
-  await new Promise((resolve, reject) => { server.once('error', reject); server.listen(opts.port || 0, host, resolve); });
+  // The same port on every start (when it is free) means the window's own cache (pictures, fonts, scripts) is still valid after a restart: the cache of a web page belongs to its address.
+  const listen = (pt) => new Promise((resolve, reject) => { const onErr = (e) => reject(e); server.once('error', onErr); server.listen(pt, host, () => { server.off('error', onErr); resolve(); }); });
+  if (opts.port) await listen(opts.port);
+  else {
+    let bound = false;
+    if (opts.preferredPort) { try { await listen(opts.preferredPort); bound = true; } catch (e) { if (e.code !== 'EADDRINUSE' && e.code !== 'EACCES') throw e; } }
+    if (!bound) await listen(0);
+  }
   const port = server.address().port;
   allowedHosts = new Set([`127.0.0.1:${port}`, `localhost:${port}`]);
   const baseUrl = `http://127.0.0.1:${port}`;
@@ -602,8 +686,8 @@ async function startServer(opts) {
   } else library.watch(getSettings().folders, Object.assign({ enabled: false }, watchOpts));
 
   return {
-    port, url: baseUrl, library, scrobbler, native, lyrics, recap, heads, covers, settings: { get: getSettings, save: saveSettings },
-    flushSync() { scrobbler.queue.saveNow(); lyrics.flush(); recap.cache.saveNow(); recap.histStore.saveNow(); paletteStore.saveNow(); library.flush(); stateStore.saveNow(); settingsStore.saveNow(); },
+    port, url: baseUrl, library, scrobbler, native, lyrics, recap, heads, covers, art, settings: { get: getSettings, save: saveSettings },
+    flushSync() { scrobbler.queue.saveNow(); lyrics.flush(); recap.cache.saveNow(); recap.histStore.saveNow(); paletteStore.saveNow(); library.flush(); covers.flush(); art.flush(); stateStore.saveNow(); settingsStore.saveNow(); },
     async close() {
       library.unwatch();
       for (const r of sseClients) { try { r.end(); } catch (_) { /* ignore */ } }
@@ -611,6 +695,7 @@ async function startServer(opts) {
       await native.close().catch(() => {});
       scrobbler.close();
       lyrics.flush(); recap.cache.saveNow(); recap.histStore.saveNow(); paletteStore.saveNow();
+      covers.flush(); art.flush(); clearTimeout(afterScanTimer);
       library.flush();
       stateStore.saveNow();
       settingsStore.saveNow();

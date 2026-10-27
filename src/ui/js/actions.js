@@ -1,8 +1,9 @@
 // User-level actions shared by menus, lists and shortcuts.
-import { api } from './api.js';
+import { api, bumpCoverRev } from './api.js';
 import { S, activePlaylist, addToPlaylist, replacePlaylist, createPlaylist, loadLibrary, emit } from './state.js';
 import { playItem } from './playback.js';
 import { toast, browseDialog } from './dialogs.js';
+import { editTagsDialog } from './tagdialog.js';
 
 export function playTracks(ids) {
   const pl = activePlaylist();
@@ -50,6 +51,27 @@ export function rescan() {
   api.scan().then(() => emit('scan-start')).catch((e) => toast(e.message, { error: true }));
 }
 
+// Edit metadata (the tag editor, tagdialog.js)
+export const editTags = (ids) => editTagsDialog(ids);
+// Album art: the picture of the song's album is looked for online (MusicBrainz / Cover Art Archive, Deezer, iTunes). Pictures are kept in Prism's own folder, never put into the music files.
+export async function downloadArt(id) {
+  if (!id) return;
+  const t = toast('Looking for the album cover…', { ms: 20000 });
+  try {
+    const r = await api.artEnsure(id, true);
+    t.close();
+    if (r.found) { bumpCoverRev(); emit('coverrev'); toast(`Album cover found (${r.source}).`, { ms: 2800 }); }
+    else toast(r.reason || 'No cover was found for this album.', { error: true, ms: 5000 });
+  } catch (e) { t.close(); toast('Could not look for the cover: ' + e.message, { error: true }); }
+}
+// "Download missing album art automatically" (Settings > Album art): when a song without any picture starts, its album is looked up once per session.
+const triedArt = new Set();
+export function autoArt(track) {
+  if (!track || track.hasCover || !track.album || !(S.settings.art && S.settings.art.auto)) return;
+  const key = `${track.albumArtist || track.artist}|${track.album}`.toLowerCase();
+  if (triedArt.has(key)) return; triedArt.add(key);
+  api.artEnsure(track.id, false).then((r) => { if (r && r.found) { bumpCoverRev(); emit('coverrev'); } }).catch(() => {});
+}
 // "Open containing folder": the server opens it (Explorer with the file selected on Windows). If the file is missing it opens the nearest folder.
 export async function revealTrack(id) {
   if (!id) return;

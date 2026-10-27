@@ -4,7 +4,7 @@
 import { api } from './api.js';
 import { S, emit, on } from './state.js';
 import { buildTheme, defaultTheme, extractPalette, toHex, checkTheme } from './color.js';
-import { bakeBlur } from './backdrop.js';
+import { loadBackdrop } from './backdrop.js';
 
 const CSS_VAR = {
   bg: '--bg', bg2: '--bg2', panel: '--panel', panel2: '--panel2', border: '--border',
@@ -18,14 +18,17 @@ let token = 0;
 /** The effective style from the settings. Older settings (dynamicColors=false) mean black & white.
  *  2.0.2: the see-through looks (frosted glass, frosted pastel, liquid) and the background blur are gone (they made the text soft and kept the GPU busy).
  *  2.0.3: frosted glass (dark) and frosted pastel (light) are back, WITHOUT any backdrop-filter: the window picture is already blurred (see backdrop.js), so panels that are
- *  simply translucent over it look frosted at no cost and text stays sharp. liquid -> flat; the extra background blur stays off. */
+ *  simply translucent over it look frosted at no cost and text stays sharp. liquid -> flat.
+ *  2.1.0: the BACKGROUND BLUR is back as an option (appearance.blur 'cover': the flat and pastel looks get see-through panels over a clearly visible, high quality blurred cover)
+ *  with a strength (appearance.blurAmount 0 soft | 1 medium | 2 strong). Still no filter anywhere: the blurred picture is made once by the server (see backdrop.js). */
 const LOOK_MAP = { flat: 'flat', pastel: 'pastel', glass: 'glass', frost: 'frost', liquid: 'flat' };       // (liquid and the background blur stay gone)
 export function styleOf(settings) {
   const a = (settings && settings.appearance) || {};
   let colors = a.colors === 'vivid' ? 'vivid' : a.colors === 'mono' ? 'mono' : 'standard';
   if (settings && settings.dynamicColors === false) colors = 'mono';
   const look = colors === 'mono' ? 'flat' : (LOOK_MAP[a.look] || 'flat');
-  return { colors, look, blur: 'off', square: !!a.square, perf: ['smooth', 'balanced', 'light'].includes(a.perf) ? a.perf : 'balanced' };
+  const blur = colors !== 'mono' && a.blur === 'cover' ? 'cover' : 'off', amt = Number(a.blurAmount);
+  return { colors, look, blur, blurAmount: amt === 0 || amt === 2 ? amt : 1, square: !!a.square, perf: ['smooth', 'balanced', 'light'].includes(a.perf) ? a.perf : 'balanced' };
 }
 /** Square corners: every element loses its rounding (CSS reads html[data-square]; the canvas visualisers read the same flag). */
 export function applyShape(settings) {
@@ -114,21 +117,22 @@ function setBackdrop(url) {
 export async function themeForTrack(track) {
   const my = ++token;
   const st = styleOf(S.settings);
-  if (!track || st.colors === 'mono') { applyTheme(defaultTheme(st.look, 'off')); setBackdrop(null); return; }
+  if (!track || st.colors === 'mono') { applyTheme(defaultTheme(st.look, st.blur)); setBackdrop(null); return; }
   const pal = await loadPalette(track, st.colors === 'vivid');
   if (my !== token) return;                                   // a newer track was started meanwhile
-  if (!pal || !pal.length) { applyTheme(defaultTheme(st.look, 'off')); setBackdrop(null); return; }
-  const theme = buildTheme(pal, { mode: st.colors, look: st.look, blur: 'off' });
+  if (!pal || !pal.length) { applyTheme(defaultTheme(st.look, st.blur)); setBackdrop(null); return; }
+  const theme = buildTheme(pal, { mode: st.colors, look: st.look, blur: st.blur });
   applyTheme(theme);
-  // the blurred cover behind the window: made once (a 32 px version, more colourful and darker; never brighter than the theme's contrast model assumes), then just stretched
+  // the blurred cover behind the window: made once per cover by the server (more colourful and darker; never brighter than the theme's contrast model assumes), then just shown
   const bright = theme.backdrop && theme.backdrop.max != null ? theme.backdrop.max : 0.55;
-  const url = await bakeBlur(api.coverUrl(track.id, 400), { size: 64, saturate: 1.5, brightness: Math.min(1, bright) });
+  const url = await loadBackdrop(track, { mode: 'window', amount: st.blurAmount, sat: 1.5, bright: Math.min(1, bright) });
   if (my !== token) return;
   setBackdrop(url);
 }
 export function initTheme() {
   applyShape(S.settings);
-  { const st0 = styleOf(S.settings); applyTheme(defaultTheme(st0.look, 'off')); }
+  { const st0 = styleOf(S.settings); applyTheme(defaultTheme(st0.look, st0.blur)); }
   on('nowplaying', ({ track }) => themeForTrack(track));
+  on('coverrev', () => { if (window.__prismCurrentTrack) themeForTrack(window.__prismCurrentTrack()); });        // art changed (a cover was downloaded): the colours and the background follow
   on('settings', () => { applyShape(S.settings); if (window.__prismCurrentTrack) themeForTrack(window.__prismCurrentTrack()); });
 }

@@ -2,13 +2,13 @@
 import { api } from './api.js';
 import { S, on, emit, persist, activePlaylist, getPlaylist, setActive, createPlaylist, renamePlaylist, deletePlaylist,
   removeItems, moveItems, sortPlaylist, shufflePlaylist, addToPlaylist } from './state.js';
-import { P, playItem, warm } from './playback.js';
+import { P, playItem, warm, warmSelection } from './playback.js';
 import { VList } from './vlist.js';
 import { fmtTime, escapeHtml, displayArtist } from './fmt.js';
 import { ICON } from './icons.js';
 import { openMenu } from './menus.js';
 import { promptText, confirmBox } from './dialogs.js';
-import { enqueueNew, addPathsToPlaylist, revealTrack } from './actions.js';
+import { enqueueNew, addPathsToPlaylist, revealTrack, editTags, downloadArt } from './actions.js';
 
 let vl, items = [];
 let sel = new Set();     // selected entry ids (item.u)
@@ -83,7 +83,7 @@ function clickRow(i, e) {
     const u = items[i].u;
     if (sel.has(u)) sel.delete(u); else sel.add(u);
     anchor = focus = i;
-  } else { selectOnly(i); warm([items[i].id], false); }
+  } else { selectOnly(i); warm([items[i].id], false); warmSelection(items[i].id); }
   refreshRows();
 }
 
@@ -114,6 +114,8 @@ function contextMenu(e, i) {
     { label: 'Add to new playlist', action: () => enqueueNew(ids, 'Selection') },
     ...(S.playlists.length > 1 ? [{ label: 'Copy to playlist', submenu: S.playlists.filter((p) => p.id !== S.activeId).map((p) => ({ label: p.name, action: () => addToPlaylist(p.id, ids) })) }] : []),
     { sep: true },
+    { label: 'Edit metadata…', action: () => editTags(ids) },
+    { label: 'Download album art', action: () => downloadArt(items[i].id) },
     { label: 'Open containing folder', action: () => revealTrack(items[i].id) },
   ], e.clientX, e.clientY);
 }
@@ -329,6 +331,7 @@ export function initPlaylistView() {
     dropIndexAt(e) { const r = listEl.getBoundingClientRect(); return e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom ? dropIndex(e) : null; },
     focus() { listEl.focus(); },
     selectAll() { sel = new Set(items.map((i) => i.u)); refreshRows(); },
+    selectedIds() { return selectedItems().map((it) => it.id); },
     removeSelected, scrollToPlaying() { const i = P.cur ? items.findIndex((it) => it.u === P.cur.u) : -1; if (i >= 0) vl.scrollTo(i, 'center'); },
     clear() { removeItems(S.activeId, new Set(items.map((i) => i.u))); },
     selectIndex(i) { selectOnly(i); refreshRows(); vl.scrollTo(i); },

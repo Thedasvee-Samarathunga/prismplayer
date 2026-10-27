@@ -114,6 +114,13 @@ function onError(msg) {
 
 // ------------------------------------------------------------------ warming: get the start of upcoming tracks ready (see server/headcache.js)
 const warmedAt = new Map();
+// A song you just selected (a click, an arrow key) is probably the next one to be played: its start is prepared a moment later, behind whatever is playing now.
+let selTimer = 0;
+export function warmSelection(id) {
+  if (!id || (S.settings.cache && S.settings.cache.prefetch === false)) return;
+  clearTimeout(selTimer);
+  selTimer = setTimeout(() => { const im = engine.impl, rate = im && im.kind === 'web' && im.ctx ? im.ctx.sampleRate : 0; api.warm([id], true, rate); }, 350);
+}
 export function warm(ids, deep) {
   const now = Date.now(), fresh = ids.filter((id) => id && !(now - (warmedAt.get(id + (deep ? 'd' : 'f')) || 0) < 30000));
   if (!fresh.length) return;
@@ -135,7 +142,7 @@ function warmUpcoming() {
   const list = items(P.cur.pid), i = list.findIndex((x) => x.u === P.cur.u);
   if (i < 0) return;
   const ids = [];
-  for (let k = 1; k <= 3; k++) { const it = list[(i + k) % list.length]; if (!it || (i + k >= list.length && S.order !== 'repeat-playlist')) break; ids.push(it.id); }
+  for (let k = 1; k <= 4; k++) { const it = list[(i + k) % list.length]; if (!it || (i + k >= list.length && S.order !== 'repeat-playlist')) break; ids.push(it.id); }
   warm(ids, true);
 }
 

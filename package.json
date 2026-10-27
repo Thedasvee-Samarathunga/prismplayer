@@ -1,7 +1,7 @@
 {
   "name": "prism-player",
-  "version": "2.0.3",
-  "description": "Prism: a foobar2000-style music player whose colours follow the album art. Cue sheets, music DJ with auto-mix, Last.fm play counts and recap summary, two solid looks, up to six resizable visualisers, synced lyrics, gapless playback, 10-band EQ, ReplayGain, WASAPI exclusive output, smart caching, customizable hotkeys.",
+  "version": "2.1.0",
+  "description": "Prism: a foobar2000-style music player whose colours follow the album art. Blurred album cover background, tag editing, automatic album art download, cue sheets, music DJ with auto-mix, Last.fm play counts and recap summary, two solid looks, up to six resizable visualisers, synced lyrics, gapless playback, 10-band EQ, ReplayGain, WASAPI exclusive output, smart caching, customizable hotkeys.",
   "main": "electron/main.js",
   "author": "Prism",
   "license": "MIT",
@@ -9,7 +9,7 @@
   "scripts": {
     "start": "electron .",
     "dev": "node scripts/dev.js",
-    "test": "node --test --test-force-exit test/server.test.js test/color.test.mjs test/appearance.test.mjs test/looks.test.mjs test/logic.test.mjs test/dsp.test.mjs test/folders.test.js test/audio.test.js test/lyrics.test.js test/lyrics-ui.test.mjs test/recap.test.js test/recapviews.test.mjs test/hotkeys.test.mjs test/cache.test.js test/electron.test.js test/cue.test.js test/mix.test.js test/lfstats.test.js test/dj.test.mjs test/vizlayout.test.mjs test/speed.test.js",
+    "test": "node --test --test-force-exit test/server.test.js test/color.test.mjs test/appearance.test.mjs test/looks.test.mjs test/logic.test.mjs test/dsp.test.mjs test/folders.test.js test/audio.test.js test/lyrics.test.js test/lyrics-ui.test.mjs test/recap.test.js test/recapviews.test.mjs test/hotkeys.test.mjs test/cache.test.js test/electron.test.js test/cue.test.js test/mix.test.js test/lfstats.test.js test/dj.test.mjs test/vizlayout.test.mjs test/speed.test.js test/tags.test.js test/covers.test.js test/art.test.js test/features21.test.js",
     "dist": "electron-builder --win nsis portable --x64 --publish never"
   },
   "devDependencies": {
@@ -53,7 +53,7 @@
       }
     ],
     "win": {
-      "icon": "build/icon.png",
+      "icon": "build/icon.ico",
       "target": [
         "nsis",
         "portable"
@@ -63,8 +63,8 @@
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "perMachine": false,
-      "installerIcon": "build/icon.ico",
-      "uninstallerIcon": "build/icon.ico"
+      "installerIcon": "build/installer.ico",
+      "uninstallerIcon": "build/installer.ico"
     },
     "portable": {
       "artifactName": "Prism-portable-${version}.exe"

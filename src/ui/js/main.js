@@ -1,5 +1,5 @@
 // Prism UI bootstrap: load data, build the views, menus, shortcuts and layout.
-import { api } from './api.js';
+import { api, bumpCoverRev } from './api.js';
 import { S, on, emit, loadAll, loadLibrary, persist, saveNow, saveSettings, createPlaylist, activePlaylist } from './state.js';
 import { engine } from './player.js';
 import { P, playItem, toggle, stop, next, prev, seekBy, order, initMediaSession } from './playback.js';
@@ -15,7 +15,7 @@ import { mountMenuBar } from './menus.js';
 import { toast, settingsDialog, shortcutsDialog, aboutDialog, browseDialog } from './dialogs.js';
 import { eqDialog, applyEq } from './eqdialog.js';
 import { reapplyGain } from './playback.js';
-import { addFilesToPlaylist, rescan, revealTrack } from './actions.js';
+import { addFilesToPlaylist, rescan, revealTrack, editTags, downloadArt, autoArt } from './actions.js';
 import { ORDERS } from './queue.js';
 import { resolveBindings, eventToCombo, shouldFire, actionFor, pretty, globalList } from './hotkeys.js';
 import { initDropFiles } from './dropfiles.js';
@@ -109,6 +109,9 @@ function menuDefs() {
       { label: 'Settings…', key: 'Ctrl+,', action: openSettings },
     ] },
     { label: 'Edit', items: () => [
+      { label: 'Edit metadata…', action: () => { const ids = plView.selectedIds(); const list = ids.length ? ids : (P.cur ? [P.cur.track.id] : []); if (list.length) editTags(list); else toast('Select songs in the playlist first.', { ms: 2200 }); } },
+      { label: 'Download album art', action: () => { const ids = plView.selectedIds(); const id = ids[0] || (P.cur && P.cur.track.id); if (id) downloadArt(id); else toast('Select a song first.', { ms: 2200 }); } },
+      { sep: true },
       { label: 'Select all', key: 'Ctrl+A', action: () => plView.selectAll() },
       { label: 'Remove selected', key: 'Del', action: () => plView.removeSelected() },
       { label: 'Clear playlist', action: () => plView.clear() },
@@ -255,6 +258,15 @@ async function boot() {
   paintDjBadge();                           // the ribbon exists now: show the "DJ is mixing" pulse after a restart too
 
   window.__prismCurrentTrack = () => (P.cur ? P.cur.track : null);
+  // Settings > Album art: a song that starts and has no picture anywhere gets its album looked up (once per album and session)
+  on('nowplaying', ({ track }) => autoArt(track));
+  // covers that the server finds in the background (after the option was switched on) appear in the lists without a restart
+  { let lastFound = -1; setInterval(async () => {
+      if (document.hidden || S.windowHidden || !(S.settings.art && S.settings.art.auto)) return;
+      const s = await api.get('/api/art/status').catch(() => null); if (!s) return;
+      if (lastFound >= 0 && s.status.found !== lastFound) { bumpCoverRev(); emit('coverrev'); }
+      lastFound = s.status.found;
+    }, 20000); }
   window.__prism = { S, P, engine, order, api }; // handy in the dev-tools console
 
   let lastOut = JSON.stringify(S.settings.output), lastRg = JSON.stringify([S.settings.replayGain, S.settings.rg]);

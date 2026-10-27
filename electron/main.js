@@ -7,7 +7,7 @@
 //  * if the previous start never got a window on screen, this start runs in safe mode (no hardware acceleration); if that works it stays that way
 //  * a crash of the graphics process restarts the app with hardware acceleration off
 //  * `--smoke-test` runs a self-test of the installed app (used by the GitHub build)
-const { app, BrowserWindow, shell, nativeTheme, ipcMain, Menu, dialog, globalShortcut } = require('electron');
+const { app, BrowserWindow, shell, nativeTheme, ipcMain, Menu, dialog, globalShortcut, nativeImage } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -85,6 +85,18 @@ function saveBounds() {
   } catch (_) { /* ignore */ }
 }
 
+// Album art thumbnails: Electron's own image code (no ffmpeg process per picture). The server uses this when it is handed in, else it falls back to ffmpeg.
+const imageTools = {
+  resize(input, width) {
+    const img = typeof input === 'string' ? nativeImage.createFromPath(input) : nativeImage.createFromBuffer(input);
+    if (!img || img.isEmpty()) return null;
+    const sz = img.getSize();
+    if (!sz.width || !sz.height) return null;
+    return img.resize({ width: Math.max(8, Math.min(width, sz.width)), quality: 'good' }).toJPEG(84);
+  },
+};
+// The same port on every start (when it is free; else any free one): the window's own cache of pictures, fonts and scripts belongs to the address, so it stays valid after a restart.
+const PREFERRED_PORT = 17613;
 async function startTheServer() {
   if (server) return server;
   log('starting Prism ' + app.getVersion() + ' (Electron ' + process.versions.electron + ', packaged: ' + app.isPackaged + ', resources: ' + process.resourcesPath + ')');
@@ -92,6 +104,8 @@ async function startTheServer() {
   server = await startServer({
     dataDir: app.getPath('userData'),
     uiDir: path.join(__dirname, '..', 'src', 'ui'),
+    imageTools,
+    preferredPort: PREFERRED_PORT,
     // "Open containing folder": Explorer with the song selected (or just the folder when the song is gone)
     reveal: (p, isDir) => { if (isDir) shell.openPath(p); else shell.showItemInFolder(p); },
   });
