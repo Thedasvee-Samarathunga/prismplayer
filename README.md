@@ -11,7 +11,7 @@
 
 <hr>
 
-A foobar2000 inspired music player whose whole interface takes its colours from the album that is playing.
+A foobar2000 inspired music player whose whole interface takes its colours from the album that is playing. Made originally as a foobar extension that didn't work 😅
 
 * **Formats:** MP3, FLAC, AAC/M4A, ALAC, WAV, AIFF, OGG Vorbis, Opus, **DSD (DSF/DFF)**, WavPack, APE, WMA, TTA, Musepack, MP2, MKA and more.
   Everything is decoded by ffmpeg into one continuous stream. DSD is converted to PCM (176.4 kHz where the output allows it); there is no native DSD / DoP output.
@@ -78,41 +78,11 @@ A foobar2000 inspired music player whose whole interface takes its colours from 
   A track counts after half its length or 4 minutes, whichever is first; tracks under 30 s are skipped.
 * Play counts / first and last played, drag & drop, shuffle / repeat, stop-after-current, media keys, resume on start.
 
-## Build the Windows app (GitHub Actions, same as foo_artcolor)
-
-1. Create a **private** repository, e.g. `prism`, and upload the **contents** of this folder
-   (`.github`, `build`, `electron`, `scripts`, `src`, `test`, `package.json`, `.gitignore`, `README.md`).
-   If `.github` does not upload (hidden folder): *Add file → Create new file*, name it `.github/workflows/build.yml`, paste the file, commit.
-2. Open **Actions → Build Prism (Windows) → Run workflow**. It downloads ffmpeg, installs Electron and builds.
-3. When it is green, download the artifact **Prism-windows**: `Prism-Setup-1.0.0.exe` (installer) and `Prism-portable-1.0.0.exe`.
-   Windows SmartScreen will warn because the app is not code-signed: *More info → Run anyway*.
-
-First start: *Settings → Library → Add folder…* and pick your music folder. Scrobbling: *Settings → Scrobbling*.
-
-## Run without building (needs Node 20+ and ffmpeg/ffprobe on PATH)
-
-    node scripts/dev.js --music "D:\Music"
-
-opens the player in your browser (Edge opens it as an app window). Data is kept in `~/.prism`.
-
 ## Scrobbling setup
 
 * **Last.fm:** create a free API account at <https://www.last.fm/api/account/create> (any name), paste the API key and shared secret into
   *Settings → Scrobbling*, press **Connect**, approve in the Last.fm page, press **Finish**. Prism never sees your password.
 * **ListenBrainz:** copy your user token from <https://listenbrainz.org/settings/> and press **Check token**.
-
-## Tests
-
-    python test/make_fixtures.py          # builds a small test library incl. a real DSF file (needs ffmpeg, Pillow, soundfile, gcc)
-    npm test                              # server, gapless (bit-exact), native helper, EQ, ReplayGain, folders, colour engine, queue/tree logic
-    python test/e2e.py                    # the real UI in headless Chromium: plays every fixture format, gapless hand-over, EQ, ReplayGain, settings
-    python test/e2e_native.py             # the WASAPI path end to end (the helper is built with a test sink on Linux)
-    python test/e2e_v20.py                # cue sheets, Last.fm play counts, recap summary, 1-6 visualisers, the DJ, the icon
-    python test/e2e_v21.py                # 2.1.0: blurred backgrounds, tag editor, album art tab, cache tab, every format still plays
-    python test/e2e_speed.py              # the 2.0.2 speed patch: one seek-bar loop, no filters, visualiser quality, deferred pre-decoding, contrast on the pre-blurred backdrop
-    python test/e2e_v14.py                # looks on real pixels, window buttons, square corners, VU, full-height Now playing
-    python test/e2e_features.py           # lyrics, fullscreen, open folder, drag-highlight, swappable visualisers (LRCLIB is mocked)
-    python test/e2e_v13.py                # seek bar alignment, Last.fm recap (mock), colour modes x looks on real pixels, file drops, hotkeys, cache
 
 ## If the installed app does not open
 
@@ -122,16 +92,9 @@ got a window on screen the next one runs in safe mode (hardware acceleration off
 a crash of the graphics process restarts the app with it off. The GitHub build also starts the real installed app (`Prism.exe --smoke-test`) and keeps
 it open for 15 seconds, and uploads the log, so a launch problem shows up in the build instead of on your PC.
 
-## What is and is not verified
-
-Everything above except the real Windows audio device is covered by automated tests. The helper's WASAPI code (`native/prism-audio.c`) is compiled for
-Windows in CI (and was cross-compiled and warning-free during development), but it could not be run against real hardware where it was written: **the
-first time you pick WASAPI exclusive on your DAC is the first real-hardware run**. If a device misbehaves Prism shows the helper's message and falls back
-to the browser output.
-
 ## Known limits
 
-* No ASIO, no native DSD / DoP output, no DSP chain beyond the EQ, no crossfade. Multi-channel files are down-mixed to stereo.
+* No ASIO, no native DSD / DoP output, no DSP chain beyond the EQ. Multi-channel files are down-mixed to stereo.
 * A change to the playlist or play order made in the last ~10 seconds of a track takes effect from the following track (the next track is already queued).
 * Tags can be edited for MP3, FLAC, M4A, Opus/Ogg (without cover art), WAV, AIFF, MKA, WMA; not for cue tracks, APE, DSD, WavPack. Internet radio is not supported. Embedded *synchronised* ID3 lyrics (SYLT) are not read (ffmpeg does not expose them); use LRC text in the LYRICS tag or a `.lrc` file.
 * Lyrics timing cannot be nudged per song yet (the LRC `[offset:]` tag is honoured).
