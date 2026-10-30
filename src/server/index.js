@@ -27,7 +27,7 @@ const DEFAULT_SETTINGS = {
   folders: [],                 // [{path, enabled}] - the ONLY places Prism ever looks for music
   watchFolders: true,          // rescan automatically when files in those folders change
   dynamicColors: true,         // legacy switch: false = black & white
-  appearance: { colors: 'standard', look: 'flat', perf: 'balanced', blur: 'cover', blurAmount: 1 },   // colors: standard | vivid | mono   look: flat | pastel | glass | frost   perf: visualiser quality smooth | balanced | light   blur: off | cover (the blurred album cover behind the window)   blurAmount: 0 soft | 1 medium | 2 strong
+  appearance: { colors: 'standard', look: 'flat', perf: 'balanced', blur: 'cover', blurAmount: 1 },   // colors: standard | vivid | super | mono   look: flat | pastel | glass | frost   perf: visualiser quality smooth | balanced | light   blur: off | cover (the blurred album cover behind the window)   blurAmount: 0 soft | 1 medium | 2 strong
   replayGain: 'off',           // off | track | album
   rg: { preamp: 0, fallback: 0, preventClipping: true },
   output: { mode: 'web', webDeviceId: '', deviceId: '', matchRate: true, bits: 0, bufferMs: 0 },   // mode: web | exclusive | shared

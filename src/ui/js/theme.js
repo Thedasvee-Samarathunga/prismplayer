@@ -1,5 +1,5 @@
 // Applies the album-art theme: extracts a palette from the cover, builds a readable theme, sets CSS variables.
-// Settings: colours (album standard / album vivid / black & white), look (flat / pastel) and square corners.
+// Settings: colours (album standard / album vivid / super vivid / black & white), look (flat / pastel) and square corners.
 // Colours always come from the album.
 import { api } from './api.js';
 import { S, emit, on } from './state.js';
@@ -24,7 +24,7 @@ let token = 0;
 const LOOK_MAP = { flat: 'flat', pastel: 'pastel', glass: 'glass', frost: 'frost', liquid: 'flat' };       // (liquid and the background blur stay gone)
 export function styleOf(settings) {
   const a = (settings && settings.appearance) || {};
-  let colors = a.colors === 'vivid' ? 'vivid' : a.colors === 'mono' ? 'mono' : 'standard';
+  let colors = a.colors === 'vivid' ? 'vivid' : a.colors === 'super' ? 'super' : a.colors === 'mono' ? 'mono' : 'standard';
   if (settings && settings.dynamicColors === false) colors = 'mono';
   const look = colors === 'mono' ? 'flat' : (LOOK_MAP[a.look] || 'flat');
   const blur = colors !== 'mono' && a.blur === 'cover' ? 'cover' : 'off', amt = Number(a.blurAmount);
@@ -118,10 +118,10 @@ export async function themeForTrack(track) {
   const my = ++token;
   const st = styleOf(S.settings);
   if (!track || st.colors === 'mono') { applyTheme(defaultTheme(st.look, st.blur)); setBackdrop(null); return; }
-  const pal = await loadPalette(track, st.colors === 'vivid');
+  const pal = await loadPalette(track, st.colors === 'vivid' || st.colors === 'super');
   if (my !== token) return;                                   // a newer track was started meanwhile
   if (!pal || !pal.length) { applyTheme(defaultTheme(st.look, st.blur)); setBackdrop(null); return; }
-  const theme = buildTheme(pal, { mode: st.colors, look: st.look, blur: st.blur });
+  const theme = buildTheme(pal, { mode: st.colors === 'super' ? 'vivid' : st.colors, boost: st.colors === 'super', look: st.look, blur: st.blur });
   applyTheme(theme);
   // the blurred cover behind the window: made once per cover by the server (more colourful and darker; never brighter than the theme's contrast model assumes), then just shown
   const bright = theme.backdrop && theme.backdrop.max != null ? theme.backdrop.max : 0.55;

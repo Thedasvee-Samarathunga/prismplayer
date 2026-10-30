@@ -319,6 +319,7 @@ export function settingsDialog({ onFoldersChanged, tab: startTab } = {}) {
       <div class="choice-row" role="radiogroup" aria-label="Colours">
         <label class="choice"><input type="radio" name="ap-colors" value="standard"><div class="swatch"><i style="background:var(--shade1)"></i><i style="background:var(--accent)"></i></div><b>Album colours</b><span>Calm, dark, tinted with the cover's main colours.</span></label>
         <label class="choice"><input type="radio" name="ap-colors" value="vivid"><div class="swatch"><i style="background:var(--shade1)"></i><i style="background:var(--shade2)"></i><i style="background:var(--shade3)"></i><i style="background:var(--shade4)"></i></div><b>Album colours: vivid</b><span>More shades from the cover, brighter and stronger everywhere.</span></label>
+        <label class="choice"><input type="radio" name="ap-colors" value="super"><div class="swatch"><i style="background:var(--shade1)"></i><i style="background:var(--shade2)"></i><i style="background:var(--shade3)"></i><i style="background:var(--shade4)"></i></div><b>Album colours: super vivid</b><span>Even brighter and more saturated than vivid.</span></label>
         <label class="choice"><input type="radio" name="ap-colors" value="mono"><div class="swatch"><i style="background:#000"></i><i style="background:#3a3a3a"></i><i style="background:#fff"></i></div><b>Black and white</b><span>Flat black, white and grey. Ignores the cover.</span></label>
       </div>
       <div class="field" style="margin-top:20px"><span class="lab">Look</span></div>

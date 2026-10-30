@@ -340,6 +340,7 @@ function pickShades(palette, n, tune) {
 
 export function buildTheme(palette, opts = {}) {
   const look = LOOKS.includes(opts.look) ? opts.look : 'flat', mode = opts.mode === 'vivid' ? 'vivid' : 'standard', blur = BLURS.includes(opts.blur) ? opts.blur : 'off';
+  const boost = mode === 'vivid' && !!opts.boost;          // "super vivid": the vivid mode pushed further (more saturated, brighter shades and surfaces); the contrast checks below still apply
   const light = LOOK_INFO[look].light;
   if (!palette || !palette.length) return defaultTheme(look, blur);
   const cfg = CFG(look, mode, blur);
@@ -350,8 +351,8 @@ export function buildTheme(palette, opts = {}) {
   const H = huePal.h;
 
   // distinct vivid shades of the cover
-  const tuneDark = (c) => { const h = toHsl(c); h.s = Math.min(0.98, Math.max(h.s, mode === 'vivid' ? 0.85 : 0.55)); h.l = mode === 'vivid' ? Math.min(0.76, Math.max(h.l, 0.62)) : Math.min(0.74, Math.max(h.l, 0.58)); return fromHsl(h); };
-  const tuneLight = (c) => { const h = toHsl(c); h.s = Math.min(0.95, Math.max(h.s, mode === 'vivid' ? 0.8 : 0.5)); h.l = Math.min(0.5, Math.max(h.l, 0.38)); return fromHsl(h); };
+  const tuneDark = (c) => { const h = toHsl(c); h.s = Math.min(0.99, Math.max(h.s, boost ? 0.97 : mode === 'vivid' ? 0.85 : 0.55)); h.l = boost ? Math.min(0.84, Math.max(h.l, 0.68)) : mode === 'vivid' ? Math.min(0.76, Math.max(h.l, 0.62)) : Math.min(0.74, Math.max(h.l, 0.58)); return fromHsl(h); };
+  const tuneLight = (c) => { const h = toHsl(c); h.s = Math.min(0.98, Math.max(h.s, boost ? 0.95 : mode === 'vivid' ? 0.8 : 0.5)); h.l = Math.min(0.5, Math.max(h.l, 0.38)); return fromHsl(h); };
   const tune = light ? tuneLight : tuneDark;
   const shades = pickShades(palette, mode === 'vivid' ? 4 : 2, tune);
   const neutralCover = !shades.length || !anyColour;
@@ -375,23 +376,23 @@ export function buildTheme(palette, opts = {}) {
     };
   } else if (!light) {
     // ---- VIVID dark: strong tinted surfaces, glowing borders, bright multi-shade accents
-    const s1 = chromatic ? 0.78 : 0;
+    const s1 = chromatic ? (boost ? 0.96 : 0.78) : 0, lb = boost ? 1.28 : 1;          // lb: surfaces a step lighter in super vivid
     const a1 = neutralCover ? fromHsl({ h: 0, s: 0, l: 0.82 }) : sh(0), a2 = neutralCover ? fromHsl({ h: 0, s: 0, l: 0.62 }) : sh(1);
     raw = {
-      bg: fromHsl({ h: hue1, s: s1, l: 0.19 }), bg2: fromHsl({ h: chromatic ? h2 : 0, s: chromatic ? 0.74 : 0, l: 0.105 }),
-      panel: fromHsl({ h: hue1, s: s1 * 0.78, l: 0.105 }), panel2: fromHsl({ h: hue1, s: s1 * 0.78, l: 0.165 }), border: fromHsl({ h: hue1, s: s1 * 0.7, l: 0.34 }),
+      bg: fromHsl({ h: hue1, s: s1, l: 0.19 * lb }), bg2: fromHsl({ h: chromatic ? h2 : 0, s: chromatic ? (boost ? 0.95 : 0.74) : 0, l: 0.105 * lb }),
+      panel: fromHsl({ h: hue1, s: s1 * 0.78, l: 0.105 * lb }), panel2: fromHsl({ h: hue1, s: s1 * 0.78, l: 0.165 * lb }), border: fromHsl({ h: hue1, s: s1 * 0.7, l: boost ? 0.46 : 0.34 }),
       fg: fromHsl({ h: hue1, s: chromatic ? 0.3 : 0, l: 0.97 }), dimBase: fromHsl({ h: hue1, s: chromatic ? 0.32 : 0, l: 0.78 }),
-      accent: a1, accent2: a2, selBg: fromHsl({ h: toHsl(a1).h, s: chromatic ? 0.72 : 0, l: 0.36 }), shades: neutralCover ? [a2, a1] : shades,
+      accent: a1, accent2: a2, selBg: fromHsl({ h: toHsl(a1).h, s: chromatic ? (boost ? 0.92 : 0.72) : 0, l: boost ? 0.44 : 0.36 }), shades: neutralCover ? [a2, a1] : shades,
     };
   } else {
     // ---- PASTEL / FROST (light surfaces, dark text). vivid = candy colours.
-    const v = mode === 'vivid', s1 = chromatic ? (v ? 0.82 : Math.min(0.6, Math.max(0.3, huePal.s * 0.8))) : 0;
+    const v = mode === 'vivid', s1 = chromatic ? (v ? (boost ? 0.98 : 0.82) : Math.min(0.6, Math.max(0.3, huePal.s * 0.8))) : 0;
     const a1 = neutralCover ? fromHsl({ h: 0, s: 0, l: 0.3 }) : sh(0), a2 = neutralCover ? fromHsl({ h: 0, s: 0, l: 0.42 }) : sh(1);
     raw = {
-      bg: fromHsl({ h: hue1, s: s1, l: v ? 0.78 : 0.86 }), bg2: fromHsl({ h: chromatic ? h2 : 0, s: chromatic ? s1 * 0.92 : 0, l: v ? 0.7 : 0.78 }),
+      bg: fromHsl({ h: hue1, s: s1, l: v ? (boost ? 0.74 : 0.78) : 0.86 }), bg2: fromHsl({ h: chromatic ? h2 : 0, s: chromatic ? s1 * 0.92 : 0, l: v ? (boost ? 0.64 : 0.7) : 0.78 }),
       panel: fromHsl({ h: hue1, s: s1 * 0.6, l: v ? 0.9 : 0.94 }), panel2: fromHsl({ h: hue1, s: s1 * 0.6, l: v ? 0.84 : 0.88 }), border: fromHsl({ h: hue1, s: s1 * 0.5, l: 0.74 }),
       fg: fromHsl({ h: hue1, s: chromatic ? 0.35 : 0, l: 0.1 }), dimBase: fromHsl({ h: hue1, s: chromatic ? 0.28 : 0, l: 0.3 }),
-      accent: a1, accent2: a2, selBg: fromHsl({ h: toHsl(a1).h, s: chromatic ? (v ? 0.78 : 0.55) : 0, l: 0.62 }), shades: neutralCover ? [a2, a1] : shades,
+      accent: a1, accent2: a2, selBg: fromHsl({ h: toHsl(a1).h, s: chromatic ? (v ? (boost ? 0.95 : 0.78) : 0.55) : 0, l: boost && v ? 0.58 : 0.62 }), shades: neutralCover ? [a2, a1] : shades,
     };
   }
   // the liquid look draws the fluid; the 'colours' blur draws a soft field of the same colours: in both cases the exact colours go into the contrast check
