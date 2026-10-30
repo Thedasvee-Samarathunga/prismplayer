@@ -292,6 +292,9 @@ input.vslider { writing-mode: vertical-lr; direction: rtl; appearance: slider-ve
 .pill-btn.on, .pill-btn[aria-pressed="true"] { background: var(--accent); color: var(--on-accent); border-color: transparent; }
 .pill-btn.static { margin-top: 10px; align-self: flex-start; }
 #cover-lyr-btn { position: absolute; right: 10px; top: 10px; z-index: 3; }
+/* the button fades into the background so it does not distract from the cover; it is fully opaque when hovered or focused */
+#cover-lyr-btn { opacity: .18; transition: opacity .25s ease; }
+#cover-lyr-btn:hover, #cover-lyr-btn:focus-visible { opacity: 1; }
 
 /* ------------------------------------------------------------------ lyrics over the cover */
 #cover-shade { position: absolute; inset: 0; background: var(--cover-shade-bg); opacity: 0; transition: opacity .35s ease; pointer-events: none; }
