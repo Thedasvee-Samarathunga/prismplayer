@@ -67,6 +67,19 @@ function sniffImage(buf) {
   return 'image/jpeg';
 }
 
+/** An imported settings file -> only the known settings, of the right kind; the DJ never starts by itself. null when nothing usable is in it. */
+function cleanImported(src) {
+  if (!src || typeof src !== 'object' || Array.isArray(src)) return null;
+  const out = {};
+  for (const k of Object.keys(DEFAULT_SETTINGS)) {
+    if (!(k in src)) continue;
+    const d = DEFAULT_SETTINGS[k], v = src[k], isObj = (x) => !!x && typeof x === 'object' && !Array.isArray(x);
+    if (Array.isArray(d) ? Array.isArray(v) : isObj(d) ? isObj(v) : typeof v === typeof d) out[k] = v;
+  }
+  if (out.dj) out.dj = Object.assign({}, out.dj, { on: false });
+  return Object.keys(out).length ? out : null;
+}
+
 function sendJson(res, obj, status = 200) {
   const body = Buffer.from(JSON.stringify(obj));
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Content-Length': body.length, 'Cache-Control': 'no-store' });
@@ -637,6 +650,16 @@ async function startServer(opts) {
       case '/api/state':
         if (req.method === 'PUT') { stateStore.set(await readBody(req, 16 * 1024 * 1024)); return sendJson(res, { ok: true }); }
         return sendJson(res, stateStore.get());
+      case '/api/settings/export':                  // everything in Settings, as one file (includes the scrobbling logins: keep the file private)
+        return sendJson(res, { prism: 'settings', version: 1, exportedAt: new Date().toISOString(), settings: getSettings() });
+      case '/api/settings/import': {
+        if (req.method !== 'POST') return sendErr(res, 405, 'POST only');
+        const b = await readBody(req);
+        const clean = cleanImported(b && b.settings && typeof b.settings === 'object' ? b.settings : b);
+        if (!clean) return sendErr(res, 400, 'That file has no Prism settings in it.');
+        saveSettings(deepMerge(DEFAULT_SETTINGS, clean));
+        return sendJson(res, getSettings());
+      }
       case '/api/settings':
         if (req.method === 'PUT') { saveSettings(await readBody(req)); return sendJson(res, getSettings()); }
         return sendJson(res, getSettings());

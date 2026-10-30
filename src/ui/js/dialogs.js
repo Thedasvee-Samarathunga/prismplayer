@@ -1,6 +1,8 @@
 // Toasts, modal dialogs, the folder/file browser and the settings dialog.
 import { api, bumpCoverRev } from './api.js';
-import { S, saveSettings, emit, loadLibrary, persist } from './state.js';
+import { S, saveSettings, saveNow, emit, loadLibrary, persist } from './state.js';
+import { VIZ_IDS } from './vizlib.js';
+import { ORDERS } from './queue.js';
 import { engine } from './player.js';
 import { styleOf } from './theme.js';
 import { vizApi } from './viz.js';
@@ -180,7 +182,7 @@ export function settingsDialog({ onFoldersChanged, tab: startTab } = {}) {
   tabsHost.className = 'tabs-inline';
   const pane = document.createElement('div');
   wrap.append(tabsHost, pane);
-  const TABS = ['Library', 'Output', 'Playback', 'Appearance', 'Hotkeys', 'Lyrics', 'Album art', 'Cache', 'Scrobbling'];
+  const TABS = ['Library', 'Output', 'Playback', 'Appearance', 'Hotkeys', 'Lyrics', 'Album art', 'Cache', 'Scrobbling', 'Backup'];
   let tab = TABS.includes(startTab) ? startTab : 'Library', pollTimer = 0;
   const onCloseHooks = [];
 
@@ -211,6 +213,7 @@ export function settingsDialog({ onFoldersChanged, tab: startTab } = {}) {
     if (tab === 'Album art') return artPane();
     if (tab === 'Cache') return cachePane();
     if (tab === 'Scrobbling') return scrobblePane();
+    if (tab === 'Backup') return backupPane();
     return playbackPane();
   }
 
@@ -498,6 +501,59 @@ export function settingsDialog({ onFoldersChanged, tab: startTab } = {}) {
     }
     draw();
     onCloseHooks.push(stopCapture);
+  }
+
+  // ---- backup: all settings (and the window layout) to a file and back
+  const numIn = (v, a, b) => (typeof v === 'number' && Number.isFinite(v) ? Math.min(b, Math.max(a, v)) : null);
+  const numArr = (v, n) => (Array.isArray(v) && v.length === n && v.every((x) => typeof x === 'number' && Number.isFinite(x) && x > 0 && x < 1e5) ? v.slice() : null);
+  /** the window layout (panel sizes, which visualisers and how big, lyrics overlay), play order and volume: what is kept in the state file, not in the settings */
+  function layoutForExport() { return { layout: JSON.parse(JSON.stringify(S.layout)), order: S.order, volume: S.volume }; }
+  /** a layout block from an imported file -> only valid values; applied to the live state and saved */
+  async function applyImportedLayout(ui) {
+    if (!ui || typeof ui !== 'object') return false;
+    const l = ui.layout && typeof ui.layout === 'object' ? ui.layout : {}, out = {};
+    for (const k of ['left', 'right']) { const n = numIn(l[k], 160, 900); if (n != null) out[k] = n; }
+    for (const k of ['hideLib', 'hideSide', 'hideViz', 'sideFull', 'lyrics', 'vizTop']) if (typeof l[k] === 'boolean') out[k] = l[k];
+    if (Array.isArray(l.viz)) {
+      const viz = l.viz.filter((id) => VIZ_IDS.includes(id)).slice(0, 6);
+      if (viz.length) { out.viz = viz; out.vizW = numArr(l.vizW, viz.length) || undefined; out.vizH = numArr(l.vizH, viz.length) || undefined; if (!out.vizW) delete out.vizW; if (!out.vizH) delete out.vizH; }
+    }
+    if (!('vizW' in out)) delete S.layout.vizW;             // sizes that no longer match the visualisers are dropped (they are made again)
+    if (!('vizH' in out)) delete S.layout.vizH;
+    Object.assign(S.layout, out);
+    if (ORDERS.some((o) => o.id === ui.order)) S.order = ui.order;
+    const v = numIn(ui.volume, 0, 1); if (v != null) S.volume = v;
+    await saveNow();
+    return true;
+  }
+  function backupPane() {
+    pane.innerHTML = `
+      <p class="note">Save every setting (appearance, hotkeys, output, equaliser, DJ, lyrics, cache, music folders, scrobbling) and the window layout (panel sizes, visualisers, lyrics overlay, volume, play order) to one file, and load it again here or on another PC.</p>
+      <div class="field" style="margin-top:14px;display:flex;gap:10px;flex-wrap:wrap"><button class="btn primary" id="bk-export" type="button">Export settings…</button><button class="btn" id="bk-import" type="button">Import settings…</button></div>
+      <input type="file" id="bk-file" accept=".json,application/json" hidden>
+      <p class="note" id="bk-msg" role="status"></p>
+      <p class="note">The file includes your <b>Last.fm and ListenBrainz logins</b>, so keep it private. Importing replaces the settings you have now and restarts the window; your library, playlists and play counts are not part of it. Music folder paths are restored as they are, so on another PC they may need changing under Library.</p>`;
+    const msg = pane.querySelector('#bk-msg'), file = pane.querySelector('#bk-file');
+    pane.querySelector('#bk-export').addEventListener('click', async () => {
+      try {
+        const data = Object.assign(await api.get('/api/settings/export'), { ui: layoutForExport() });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));
+        a.download = 'prism-settings-' + new Date().toISOString().slice(0, 10) + '.json';
+        document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+        msg.textContent = 'Settings exported.';
+      } catch (e) { msg.textContent = 'Could not export: ' + e.message; }
+    });
+    pane.querySelector('#bk-import').addEventListener('click', () => file.click());
+    file.addEventListener('change', async () => {
+      const f = file.files && file.files[0]; file.value = '';
+      if (!f) return;
+      let data;
+      try { data = JSON.parse(await f.text()); } catch (_) { msg.textContent = 'That file is not a Prism settings file.'; return; }
+      if (!(await confirmBox('Import settings', `Replace your current settings with the ones in "${f.name}"?`, 'Import'))) return;
+      try { await api.post('/api/settings/import', data); await applyImportedLayout(data.ui); msg.textContent = 'Settings imported. Restarting the window…'; setTimeout(() => location.reload(), 700); }
+      catch (e) { msg.textContent = 'Could not import: ' + e.message; }
+    });
   }
 
   // ---- lyrics

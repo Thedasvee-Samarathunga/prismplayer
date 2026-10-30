@@ -1,5 +1,8 @@
-Prism 2.1.1. Unzip over the repo (it contains binary icon files) and commit.
-- DJ: "Start a new mix" always builds a fresh queue (avoids the songs just queued / playing), makes the DJ Mix list active and plays it. A separate "Stop the mix" button.
-- DJ: new "By artist" source (search, pick several). "Clear all" empties the picked genres / artists.
-- Icons: build/icon.ico and build/installer.ico are now identical plain-bitmap icons (16-256 px, standard sizes only, no PNG-compressed picture). Rebuild with scripts/make-icons.py.
-- Taskbar preview: previous / play-pause / next buttons (Windows), the icon follows play/pause.
+Prism 2.1.1. Unzip over the repo (it contains binary icon files) and commit. Everything below is in this one zip.
+- DJ: "Start a new mix" always builds a fresh queue and plays it; separate "Stop the mix". New "By artist" source (search, pick several). "Clear all" empties picked genres / artists.
+- Lyrics: NetEase Cloud Music is tried when LRCLIB has no synced lyrics (Settings > Lyrics, can be switched off). Right-click the album art > Add synced lyrics (paste LRC or load a file), edit, remove, search again.
+- Colours: new "Album colours: super vivid" (brighter and more saturated than vivid).
+- Settings > Backup: export all settings AND the window layout (panel sizes, visualisers, lyrics overlay, volume, play order) to a file, import them again (includes scrobbling logins: keep the file private).
+- Taskbar preview: previous / play-pause / next buttons.
+- Icon: plain-bitmap .ico files (standard sizes), the window uses the .ico, .gitattributes keeps icon files binary. The package description is now just "Prism Player": the long one overflowed the installer's shortcuts (blank icon, garbage in "Start in").
+- Cover lyrics button fades out until hovered (app.css).

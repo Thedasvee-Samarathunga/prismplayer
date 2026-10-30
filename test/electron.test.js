@@ -213,3 +213,8 @@ test('boot bookkeeping: counts consecutive failures, survives a read-only profil
   const blocker = path.join(tmp('d'), 'iam-a-file'); fs.writeFileSync(blocker, 'x');
   assert.doesNotThrow(() => boot.beginLaunch(path.join(blocker, 'profile')), 'an unwritable profile folder must not stop the app from starting');
 });
+
+test('package description stays short: the installer writes it into every shortcut, and a long one corrupts the shortcut (blank icon, garbage in "Start in")', () => {
+  const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
+  assert.ok(pkg.description.length <= 120, 'description is ' + pkg.description.length + ' characters');
+});
