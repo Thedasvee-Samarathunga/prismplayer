@@ -38,7 +38,7 @@ const DEFAULT_SETTINGS = {
   hotkeys: {},                 // action id -> key combination ('' = unassigned); see ui/js/hotkeys.js
   hotkeyGlobal: false,         // register the global ones system-wide (desktop app)
   recap: { user: '' },         // Last.fm user name for the recap (defaults to the connected scrobbling account)
-  lyrics: { online: true },    // look up missing / unsynced lyrics on LRCLIB (sends artist, title, album, length)
+  lyrics: { online: true, netease: true },    // look up missing / unsynced lyrics on LRCLIB (sends artist, title, album, length)
   scrobble: {
     lastfm: { enabled: false, apiKey: '', secret: '', sessionKey: '', user: '' },
     listenbrainz: { enabled: false, token: '', user: '' },
@@ -162,7 +162,7 @@ async function startServer(opts) {
     if (rescan) library.scan(st.folders).catch((e) => console.error('[scan]', e));
   }
   const scrobbler = new Scrobbler({ dataDir, getSettings, saveSettings, lastfmRoot: opts.lastfmRoot, lbRoot: opts.lbRoot });
-  const lyrics = new LyricsService({ dataDir, getSettings, lrclibRoot: opts.lrclibRoot });
+  const lyrics = new LyricsService({ dataDir, getSettings, lrclibRoot: opts.lrclibRoot, neteaseRoot: opts.neteaseRoot });
   const recap = new RecapService(Object.assign({ dataDir, getSettings, lastfmRoot: opts.lastfmRoot }, opts.recap || {}));
   // The DJ's auto-mix: while the DJ is on, tracks overlap by this many seconds (0 = plain gapless). Read live, so the slider takes effect on the next track.
   const djCrossfade = () => { const d = getSettings().dj || {}; return d.on ? Math.max(0, Math.min(12, Number(d.crossfade) || 0)) : 0; };
@@ -540,6 +540,13 @@ async function startServer(opts) {
       case '/api/lyrics': {
         const t = trackOr404(); if (!t) return;
         return sendJson(res, await lyrics.get(t, { refresh: q.get('refresh') === '1' }));
+      }
+      case '/api/lyrics/manual': {                  // lyrics typed / pasted / loaded from an .lrc file by the user ('' text removes them)
+        if (req.method !== 'POST') return sendErr(res, 405, 'POST only');
+        const b = await readBody(req);
+        const t = library.get(b.id); if (!t) return sendErr(res, 404, 'unknown track');
+        try { lyrics.setManual(t.id, typeof b.text === 'string' ? b.text : ''); } catch (e) { return sendErr(res, 400, e.message); }
+        return sendJson(res, await lyrics.get(t));
       }
       case '/api/reveal': {
         if (req.method !== 'POST') return sendErr(res, 405, 'POST only');

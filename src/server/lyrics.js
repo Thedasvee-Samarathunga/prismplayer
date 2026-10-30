@@ -5,7 +5,9 @@
 //   1. a .lrc file next to the song (same name)           -> synced
 //   2. lyrics embedded in the tags (LYRICS / USLT)         -> synced if they carry [mm:ss.xx] stamps, else plain
 //   3. LRCLIB (https://lrclib.net), if online lookup is on -> synced when the database has it
+//   3b. NetEase Cloud Music (music.163.com), if online lookup and "NetEase" are on, when LRCLIB has no synced lyrics (big for Asian and many other songs)
 //   4. a .xml (OpenLyrics) or .txt file next to the song   -> plain
+// Lyrics you add yourself (right-click the cover) are kept in the Prism data folder and win over everything.
 // A synced result always wins over a plain one, wherever it comes from.
 // Online results (and misses) are cached on disk so each song is looked up at most once.
 const fs = require('fs');
@@ -16,6 +18,8 @@ const ff = require('./ffmpeg');
 const { JsonStore } = require('./store');
 
 const LRCLIB_ROOT = 'https://lrclib.net';
+const NETEASE_ROOT = 'https://music.163.com';
+const BROWSER_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
 const CLIENT = 'Prism/1.2 (foobar2000-style player; https://lrclib.net client)';
 const MISS_TTL_MS = 7 * 24 * 3600 * 1000;   // a miss is remembered for a week (the database grows over time)
 const MAX_TEXT = 512 * 1024;                // lyrics files larger than this are ignored
@@ -230,11 +234,14 @@ async function keepPlain(embedded, side) {
 // ---------------------------------------------------------------------------------------------
 // LRCLIB
 // ---------------------------------------------------------------------------------------------
-function httpGetJson(urlStr, timeoutMs = 9000) {
+function httpGetJson(urlStr, timeoutMs = 9000, { headers = {}, method = 'GET', form = null } = {}) {
   return new Promise((resolve, reject) => {
     const u = new URL(urlStr);
     const lib = u.protocol === 'http:' ? http : https;
-    const req = lib.get(u, { headers: { 'User-Agent': CLIENT, 'Lrclib-Client': CLIENT, Accept: 'application/json' }, timeout: timeoutMs }, (res) => {
+    const h = Object.assign({ 'User-Agent': CLIENT, 'Lrclib-Client': CLIENT, Accept: 'application/json' }, headers);
+    const data = form ? Buffer.from(form) : null;
+    if (data) { h['Content-Type'] = 'application/x-www-form-urlencoded'; h['Content-Length'] = data.length; }
+    const req = lib.request(u, { method, headers: h, timeout: timeoutMs }, (res) => {
       const chunks = [];
       res.on('data', (d) => chunks.push(d));
       res.on('end', () => {
@@ -246,6 +253,8 @@ function httpGetJson(urlStr, timeoutMs = 9000) {
     });
     req.on('timeout', () => req.destroy(new Error('timeout')));
     req.on('error', reject);
+    if (data) req.write(data);
+    req.end();
   });
 }
 
@@ -279,16 +288,84 @@ async function lrclibLookup(root, t) {
 }
 
 // ---------------------------------------------------------------------------------------------
+// NetEase Cloud Music (music.163.com): search by "title artist", pick the result whose title, artist and length fit, read its LRC.
+// ---------------------------------------------------------------------------------------------
+const norm = (x) => String(x || '').toLowerCase().replace(/[\(\[（【][^\)\]）】]*[\)\]）】]/g, ' ').replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+
+/** how well a NetEase search hit fits our song: 0 = not it. Title must match; artist and length sharpen it. */
+function neteaseScore(song, t) {
+  const want = norm(t.title), got = norm(song && song.name);
+  if (!want || !got) return 0;
+  let sc = got === want ? 10 : (got.includes(want) || want.includes(got)) && Math.min(got.length, want.length) >= 3 ? 5 : 0;
+  if (!sc) return 0;
+  const artists = [t.artist, t.albumArtist].map(norm).filter(Boolean);
+  const names = ((song.artists || song.ar || []).map((a) => norm(a && a.name))).filter(Boolean);
+  if (artists.length && names.length) {
+    const hit = artists.some((a) => names.some((n) => n === a || n.includes(a) || a.includes(n) || a.split(' ').some((w) => w.length > 2 && n.split(' ').includes(w))));
+    if (!hit) return 0;
+    sc += 4;
+  }
+  const dur = t.duration || 0, sd = (song.duration || song.dt || 0) / 1000;
+  if (dur && sd) { const d = Math.abs(dur - sd); if (d > 6) return 0; sc += d <= 2 ? 3 : 1; }
+  return sc;
+}
+
+async function neteaseLookup(root, t) {
+  const headers = { 'User-Agent': BROWSER_UA, Referer: root + '/', Cookie: 'appver=2.0.2; os=pc' };
+  const q = [t.title, t.artist || t.albumArtist].filter(Boolean).join(' ');
+  const params = new URLSearchParams({ s: q, type: '1', limit: '12', offset: '0', total: 'true' });
+  let res = await httpGetJson(`${root}/api/search/get?${params}`, 9000, { headers });
+  if (!(res.json && res.json.result && Array.isArray(res.json.result.songs))) res = await httpGetJson(`${root}/api/search/get/web?csrf_token=`, 9000, { headers, method: 'POST', form: params.toString() });
+  if (res.status !== 200 || !res.json) throw new Error('NetEase answered ' + res.status);
+  const songs = (res.json.result && res.json.result.songs) || [];
+  const ranked = songs.map((song) => ({ song, sc: neteaseScore(song, t) })).filter((x) => x.sc > 0).sort((a, b) => b.sc - a.sc).slice(0, 3);
+  let plain = null;
+  for (const { song } of ranked) {
+    const ly = await httpGetJson(`${root}/api/song/lyric?${new URLSearchParams({ id: String(song.id), lv: '1', kv: '1', tv: '-1' })}`, 9000, { headers });
+    if (ly.status !== 200 || !ly.json) continue;
+    if (ly.json.pureMusic || ly.json.nolyric) continue;
+    const text = ly.json.lrc && ly.json.lrc.lyric;
+    if (!text || !text.trim() || /纯音乐，请欣赏/.test(text)) continue;
+    const r = parseAny(text);
+    if (!r.lines.some((l) => l.text)) continue;
+    r.source = 'NetEase';
+    if (r.synced) return r;
+    plain = plain || r;
+  }
+  return plain;
+}
+
+// ---------------------------------------------------------------------------------------------
 // Service
 // ---------------------------------------------------------------------------------------------
 class LyricsService {
-  constructor({ dataDir, getSettings, lrclibRoot }) {
+  constructor({ dataDir, getSettings, lrclibRoot, neteaseRoot }) {
     this.getSettings = getSettings;
     this.root = (lrclibRoot || process.env.PRISM_LRCLIB_ROOT || LRCLIB_ROOT).replace(/\/$/, '');
+    // a test that stands in for LRCLIB must not reach the real NetEase either (unless it stands in for that too)
+    this.neRoot = neteaseRoot === undefined ? (lrclibRoot || process.env.PRISM_LRCLIB_ROOT ? null : NETEASE_ROOT) : (neteaseRoot ? String(neteaseRoot).replace(/\/$/, '') : null);
     this.cache = new JsonStore(path.join(dataDir, 'lyrics-cache.json'), { v: 1, items: {} });
     this.cache.load();
+    this.manual = new JsonStore(path.join(dataDir, 'lyrics-manual.json'), { v: 1, items: {} });       // lyrics added by hand: { trackId: raw text }
+    this.manual.load();
     this.inflight = new Map();
     this.lastOnlineError = '';
+  }
+
+  neteaseOn() { const s = this.getSettings().lyrics; return !!this.neRoot && (!s || s.netease !== false); }
+
+  /** save lyrics typed / pasted by the user for one song ('' removes them). Throws a readable error when the text has no lyrics. */
+  setManual(id, text) {
+    text = String(text || '').replace(/^\ufeff/, '');
+    if (text.length > MAX_TEXT) throw new Error('That text is too long to be lyrics.');
+    const items = this.manual.get().items;
+    if (!text.trim()) delete items[id];
+    else {
+      const r = parseAny(text);
+      if (!r.lines.some((l) => l.text)) throw new Error('No lyrics found in that text.');
+      items[id] = text;
+    }
+    this.manual.saveNow();
   }
 
   online() { const s = this.getSettings().lyrics; return !s || s.online !== false; }
@@ -303,27 +380,39 @@ class LyricsService {
   }
 
   async _get(track, refresh) {
-    const base = { id: track.id, found: false, source: '', synced: false, instrumental: false, lines: [], meta: {}, onlineEnabled: this.online(), error: '' };
+    const base = { id: track.id, found: false, source: '', synced: false, instrumental: false, lines: [], meta: {}, onlineEnabled: this.online(), error: '', manual: false };
+    const mine = this.manual.get().items[track.id];
+    if (mine) {
+      const r = parseAny(mine);
+      if (r.lines.some((l) => l.text)) return Object.assign(base, this._pack(Object.assign(r, { source: 'added by you' })), { manual: true, manualText: mine });
+    }
     const local = await localLyrics(track);
     if (local && local.synced) return Object.assign(base, this._pack(local));
 
     let online = null, error = '';
     if (this.online() && track.title && (track.artist || track.albumArtist)) {
-      const ck = `${track.id}|${track.mtime || 0}`;
+      const ne = this.neteaseOn();
+      const ck = `${track.id}|${track.mtime || 0}${ne ? '|n' : ''}`;
       const hit = this.cache.get().items[ck];
       const fresh = hit && (hit.miss ? Date.now() - hit.at < MISS_TTL_MS : true);
       if (hit && fresh && !refresh) online = hit.miss ? null : hit.result;
       else {
-        try {
-          online = await lrclibLookup(this.root, track);
+        const failed = [];
+        const attempt = async (name, fn) => { try { return await fn(); } catch (e) { failed.push(`${name} (${e.message})`); return null; } };
+        online = await attempt('LRCLIB', () => lrclibLookup(this.root, track));
+        if (!(online && (online.synced || online.instrumental)) && ne) {
+          const other = await attempt('NetEase', () => neteaseLookup(this.neRoot, track));
+          if (other && (!online || (other.synced && !online.synced))) online = other;
+        }
+        if (!failed.length) {
           this.cache.get().items[ck] = online ? { at: Date.now(), result: online } : { at: Date.now(), miss: true };
           this._trim();
           this.cache.saveSoon();
           this.lastOnlineError = '';
-        } catch (e) {
-          error = `Could not reach LRCLIB (${e.message}). Showing what is available offline.`;     // not cached: retried next time
-          this.lastOnlineError = e.message;
-          if (hit && !hit.miss) online = hit.result;
+        } else if (!(online && online.synced)) {                // not cached: retried next time
+          error = `Could not reach ${failed.map((f) => f.split(' (')[0]).join(' / ')} (${failed[0].replace(/^[^(]*\(|\)$/g, '')}). Showing what is available offline.`;
+          this.lastOnlineError = failed[0];
+          if (hit && !hit.miss && !online) online = hit.result;
         }
       }
     }
@@ -344,7 +433,7 @@ class LyricsService {
     for (const k of keys.slice(0, keys.length - 3500)) delete items[k];
   }
 
-  flush() { this.cache.saveNow(); }
+  flush() { this.cache.saveNow(); this.manual.saveNow(); }
 }
 
-module.exports = { LyricsService, parseLrc, parsePlain, parseAny, parseOpenLyrics, decodeText, looksSynced, findSidecars, lrclibLookup };
+module.exports = { LyricsService, parseLrc, parsePlain, parseAny, parseOpenLyrics, decodeText, looksSynced, findSidecars, lrclibLookup, neteaseLookup, neteaseScore };

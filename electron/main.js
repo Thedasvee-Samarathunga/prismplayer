@@ -113,6 +113,13 @@ async function startTheServer() {
   return server;
 }
 
+// Windows takes the taskbar / title icon of a window from an .ico best (all sizes, no conversion), other systems from the PNG.
+function windowIconFile() {
+  const res = process.resourcesPath && path.join(process.resourcesPath, 'icon'), dev = path.join(__dirname, '..', 'build');
+  const ico = [res && path.join(res, 'icon.ico'), path.join(dev, 'icon.ico')], png = [res && path.join(res, 'icon.png'), path.join(dev, 'icon.png')];
+  return (process.platform === 'win32' ? ico.concat(png) : png.concat(ico)).filter(Boolean).find((f) => fs.existsSync(f));
+}
+
 async function createWindow() {
   await startTheServer();
   Menu.setApplicationMenu(null);
@@ -122,7 +129,7 @@ async function createWindow() {
     backgroundColor: '#000000', show: false, title: 'Prism Player',
     // the window / taskbar icon: the packaged app carries it next to the program (resources/icon/icon.png, see extraResources in package.json: the build folder is not
     // inside the app), a development run reads it from build/. Without this the window depended on the icon stored in Prism.exe alone.
-    icon: [process.resourcesPath && path.join(process.resourcesPath, 'icon', 'icon.png'), path.join(__dirname, '..', 'build', 'icon.png'), path.join(__dirname, '..', 'build', 'icon.ico')].filter(Boolean).find((f) => fs.existsSync(f)),
+    icon: windowIconFile(),
     // No native title bar and no native window buttons: the app draws its own minimise / maximise / close buttons in the theme's colours
     // (the native overlay can only show one flat colour, which never matched the album colours). The title bar is a drag region.
     titleBarStyle: 'hidden',
@@ -132,6 +139,12 @@ async function createWindow() {
       backgroundThrottling: false,
     },
   });
+  // Windows: also tell the taskbar which icon this program's button should use (stored on the window itself), so a button that is not a pinned shortcut,
+  // or whose pinned shortcut has a stale icon, still gets the Prism icon.
+  try {
+    const f = windowIconFile();
+    if (process.platform === 'win32' && f && typeof win.setAppDetails === 'function') win.setAppDetails({ appId: 'com.prism.player', appIconPath: f, appIconIndex: 0, relaunchDisplayName: 'Prism Player' });
+  } catch (e) { log('setAppDetails failed: ' + e.message); }
   if (b.max) win.maximize();
   // show the window as soon as it is ready, and in any case after 3 s so it can never stay invisible
   win.once('ready-to-show', () => { win.show(); thumbKey = ''; applyThumbar(lastPlayback); });

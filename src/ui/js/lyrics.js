@@ -7,7 +7,8 @@ import { engine } from './player.js';
 import { fmtTime, escapeHtml, displayArtist } from './fmt.js';
 import { ICON } from './icons.js';
 import { indexAt, stateOf, sourceLabel } from './lyriclogic.js';
-import { toast } from './dialogs.js';
+import { toast, modal } from './dialogs.js';
+import { openMenu } from './menus.js';
 import { loadBackdrop } from './backdrop.js';
 import { styleOf } from './theme.js';
 
@@ -133,6 +134,45 @@ function tick() {
   }
   if (P.state === 'playing' || fsOpen) kick();
 }
+// ------------------------------------------------------------------------------------ lyrics added by hand (right-click the cover)
+function manualDialog(track) {
+  const have = LY.data && LY.data.manual && LY.track && LY.track.id === track.id ? LY.data.manualText || '' : '';
+  const body = document.createElement('div');
+  body.innerHTML = `<p class="note" style="margin:0 0 8px">Paste synced lyrics in LRC form, one line per row with its time in front, e.g. <b>[01:23.45] the words</b>. Lyrics without times work too, but then they do not follow the music.</p>
+    <textarea id="ml-text" spellcheck="false" style="width:100%;height:280px;resize:vertical;font-family:ui-monospace,Consolas,monospace;font-size:12.5px;line-height:1.5;background:var(--panel2);color:var(--fg);border:1px solid var(--border);border-radius:9px;padding:9px 11px;outline:none;user-select:text" placeholder="[00:12.30] First line&#10;[00:16.80] Second line"></textarea>
+    <div style="display:flex;gap:8px;align-items:center;margin-top:8px"><button class="btn" id="ml-file" type="button">Load an .lrc / .txt file…</button><span class="note" id="ml-msg" style="margin:0"></span></div>
+    <input type="file" id="ml-pick" accept=".lrc,.txt,text/plain" hidden>`;
+  const ta = body.querySelector('#ml-text'), msg = body.querySelector('#ml-msg'), pick = body.querySelector('#ml-pick');
+  ta.value = have;
+  body.querySelector('#ml-file').addEventListener('click', () => pick.click());
+  pick.addEventListener('change', async () => { const f = pick.files && pick.files[0]; if (!f) return; try { ta.value = await f.text(); msg.textContent = f.name + ' loaded. Press Save to keep it.'; } catch (e) { msg.textContent = 'Could not read that file.'; } });
+  modal({
+    title: `Lyrics for "${track.title}"`, body, width: '640px',
+    buttons: [{ label: 'Cancel' }, { label: 'Save', primary: true, onClick: async () => {
+      const text = ta.value;
+      if (!text.trim()) { msg.textContent = 'Paste some lyrics first (or use Cancel).'; ta.focus(); return false; }
+      try { await api.post('/api/lyrics/manual', { id: track.id, text }); } catch (e) { msg.textContent = e.message; return false; }
+      toast('Lyrics saved.', { ms: 1800 }); loadLyrics(track);
+    } }],
+  });
+  setTimeout(() => ta.focus(), 0);
+}
+async function removeManual(track) {
+  try { await api.post('/api/lyrics/manual', { id: track.id, text: '' }); toast('Your lyrics were removed.', { ms: 1800 }); loadLyrics(track); } catch (e) { toast(e.message, { error: true }); }
+}
+function coverMenu(e) {
+  const t = P.cur ? P.cur.track : null;
+  e.preventDefault();
+  if (!t) return;
+  const mine = !!(LY.data && LY.data.manual && LY.track && LY.track.id === t.id);
+  openMenu([
+    { label: mine ? 'Edit my lyrics…' : 'Add synced lyrics…', action: () => manualDialog(t) },
+    ...(mine ? [{ label: 'Remove my lyrics', action: () => removeManual(t) }] : []),
+    { sep: true },
+    { label: 'Search for lyrics again', action: () => { if (!S.layout.lyrics && !fsOpen) setLyricsOn(true); loadLyrics(t, true); } },
+  ], e.clientX, e.clientY);
+}
+
 // ------------------------------------------------------------------------------------ cover overlay
 export function setLyricsOn(on_) {
   S.layout.lyrics = !!on_;
@@ -236,6 +276,8 @@ export function initLyrics({ slider }) {
   bl.addEventListener('click', () => toggleLyrics());
   cb.addEventListener('click', () => toggleLyrics());
   bf.addEventListener('click', () => toggleFullscreen());
+  const cw = $('cover-wrap'); if (cw) cw.addEventListener('contextmenu', coverMenu);
+  fsEls.root.addEventListener('contextmenu', coverMenu);
 
   // follow playback
   on('nowplaying', ({ track }) => { if (fsOpen) setFsMeta(track); ensureLoaded(); kick(); });

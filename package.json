@@ -9,7 +9,7 @@
   "scripts": {
     "start": "electron .",
     "dev": "node scripts/dev.js",
-    "test": "node --test --test-force-exit test/server.test.js test/color.test.mjs test/appearance.test.mjs test/looks.test.mjs test/logic.test.mjs test/dsp.test.mjs test/folders.test.js test/audio.test.js test/lyrics.test.js test/lyrics-ui.test.mjs test/recap.test.js test/recapviews.test.mjs test/hotkeys.test.mjs test/cache.test.js test/electron.test.js test/cue.test.js test/mix.test.js test/lfstats.test.js test/dj.test.mjs test/vizlayout.test.mjs test/speed.test.js test/tags.test.js test/covers.test.js test/art.test.js test/features21.test.js",
+    "test": "node --test --test-force-exit test/server.test.js test/color.test.mjs test/appearance.test.mjs test/looks.test.mjs test/logic.test.mjs test/dsp.test.mjs test/folders.test.js test/audio.test.js test/lyrics.test.js test/lyrics2.test.js test/lyrics-ui.test.mjs test/recap.test.js test/recapviews.test.mjs test/hotkeys.test.mjs test/cache.test.js test/electron.test.js test/cue.test.js test/mix.test.js test/lfstats.test.js test/dj.test.mjs test/vizlayout.test.mjs test/speed.test.js test/tags.test.js test/covers.test.js test/art.test.js test/features21.test.js",
     "dist": "electron-builder --win nsis portable --x64 --publish never"
   },
   "devDependencies": {
@@ -48,7 +48,8 @@
         "from": "build",
         "to": "icon",
         "filter": [
-          "icon.png"
+          "icon.png",
+          "icon.ico"
         ]
       }
     ],

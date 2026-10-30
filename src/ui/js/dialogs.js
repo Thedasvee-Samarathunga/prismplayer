@@ -508,13 +508,18 @@ export function settingsDialog({ onFoldersChanged, tab: startTab } = {}) {
         <li>a <b>.lrc</b> file next to the song with the same name (synced)</li>
         <li>lyrics stored in the song's tags (synced if they carry timestamps)</li>
         <li><b>LRCLIB</b>, a free open lyrics library (synced when it has them)</li>
+        <li><b>NetEase Cloud Music</b>, tried when LRCLIB has no synced lyrics (good for Asian songs and many others)</li>
         <li>an <b>OpenLyrics</b> <b>.xml</b> or a <b>.txt</b> file next to the song (not synced)</li>
       </ol>
+      <p class="note">Lyrics you add yourself (<b>right-click the album art</b> > Add synced lyrics) are kept in Prism's data folder and always win.</p>
       <label class="check" style="margin-top:12px"><input type="checkbox" id="ly-online"> Look up missing or unsynced lyrics on LRCLIB</label>
-      <p class="note">This sends the song's <b>artist, title, album and length</b> to lrclib.net, only while a lyrics view is open and only once per song (answers are remembered, including "not found"). Turn it off to keep everything on this PC.</p>
+      <label class="check" style="margin-top:6px"><input type="checkbox" id="ly-netease"> Also look on NetEase Cloud Music</label>
+      <p class="note">This sends the song's <b>artist, title, album and length</b> to lrclib.net (and, with NetEase on, the <b>title and artist</b> to music.163.com), only while a lyrics view is open and only once per song (answers are remembered, including "not found"). Turn it off to keep everything on this PC.</p>
       <p class="note">Synced lyrics highlight the current line and scroll with the music; click a line to jump there. Your music files are never changed.</p>`;
     const cb = pane.querySelector('#ly-online'); cb.checked = l.online !== false;
     cb.addEventListener('change', () => saveSettings({ lyrics: { online: cb.checked } }));
+    const ne = pane.querySelector('#ly-netease'); ne.checked = l.netease !== false;
+    ne.addEventListener('change', () => saveSettings({ lyrics: { netease: ne.checked } }));
   }
 
   // ---- scrobbling
