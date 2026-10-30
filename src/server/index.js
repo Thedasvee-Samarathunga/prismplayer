@@ -32,7 +32,7 @@ const DEFAULT_SETTINGS = {
   rg: { preamp: 0, fallback: 0, preventClipping: true },
   output: { mode: 'web', webDeviceId: '', deviceId: '', matchRate: true, bits: 0, bufferMs: 0 },   // mode: web | exclusive | shared
   eq: { enabled: false, preamp: 0, gains: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], preset: 'Flat', autoPreamp: true },
-  dj: { on: false, mode: 'all', genres: [], style: 'balanced', crossfade: 6 },      // the music DJ (ribbon): what to mix, how, and how long tracks overlap
+  dj: { on: false, mode: 'all', genres: [], artists: [], style: 'balanced', crossfade: 6 },      // the music DJ (ribbon): what to mix, how, and how long tracks overlap
   cache: { prefetch: true, maxHeadMB: 512, maxCoverMB: 256, maxBackdropMB: 160 },   // smart caching: pre-decoded track starts, cover thumbnails, blurred backgrounds
   art: { auto: false, saveToFolder: false },                // download missing album art (MusicBrainz / Cover Art Archive, Deezer, iTunes); saveToFolder = also write cover.jpg next to the music
   hotkeys: {},                 // action id -> key combination ('' = unassigned); see ui/js/hotkeys.js

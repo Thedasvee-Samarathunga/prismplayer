@@ -593,8 +593,11 @@ html[data-square="1"] .vz-grip::after { border-radius: 0 !important; }
 .dj-seg button + button { border-left: 1px solid var(--border); }
 .dj-seg button.on { background: var(--accent); color: var(--on-accent); }
 .dj-seg button:not(.on):hover { color: var(--fg); background: color-mix(in srgb, var(--fg) 8%, transparent); }
-#dj-filter { background: var(--panel2); border: 1px solid var(--border); border-radius: 9px; padding: 7px 10px; outline: none; user-select: text; }
+#dj-filter { flex: 1; min-width: 0; background: var(--panel2); border: 1px solid var(--border); border-radius: 9px; padding: 7px 10px; outline: none; user-select: text; }
 #dj-filter:focus { border-color: var(--accent); }
+.dj-pickrow { display: flex; gap: 8px; align-items: stretch; }
+.dj-clear { padding: 6px 12px; font-size: 12px; white-space: nowrap; }
+.dj-stop { margin-top: 8px; }
 .dj-chips { display: flex; flex-wrap: wrap; gap: 6px; max-height: 128px; overflow-y: auto; scrollbar-width: thin; padding: 2px; }
 .dj-chip { padding: 5px 10px; border-radius: 99px; border: 1px solid var(--border); background: var(--panel2); font-size: 11.5px; font-weight: 700; color: var(--fg); }
 .dj-chip em { font-style: normal; color: var(--dim); font-weight: 600; margin-left: 3px; }

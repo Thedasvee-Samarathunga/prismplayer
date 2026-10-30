@@ -203,6 +203,11 @@ function initKeys() {
   bindings = resolveBindings(S.settings.hotkeys); updateTitles(); applyGlobalHotkeys();
   on('settings', () => { bindings = resolveBindings(S.settings.hotkeys); updateTitles(); applyGlobalHotkeys(); });
   if (window.prismHost && window.prismHost.onHotkey) window.prismHost.onHotkey((id) => runAction(id));
+  // taskbar preview buttons (previous / play-pause / next): tell the desktop shell what is playing
+  if (window.prismHost && window.prismHost.setPlaybackState) {
+    const send = () => window.prismHost.setPlaybackState({ playing: P.state === 'playing' || P.state === 'loading', hasTrack: !!P.cur });
+    on('playstate', send); on('nowplaying', send); send();
+  }
   window.addEventListener('keydown', (e) => {
     if (S.hotkeyCapture) return;                                           // the Hotkeys settings tab is listening for a new combination
     if (e.key === 'F11') { e.preventDefault(); toggleFullscreen(); return; }

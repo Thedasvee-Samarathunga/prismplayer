@@ -162,8 +162,8 @@ test('taskbar identity: the app id matches the installer (so the taskbar groups 
   const w = f.calls.windows[0];
   assert.ok(typeof w.opts.icon === 'string' && /build[\\/]icon\.(ico|png)$/.test(w.opts.icon), 'the dev run shows the icon in the window: ' + w.opts.icon);
   // the program (exe, shortcuts, taskbar) gets its icon from the PNG, converted by electron-builder in the standard way; the installer keeps the classic-bitmap .ico
-  assert.equal(pkg.build.win.icon, 'build/icon.png');
-  assert.equal(pkg.build.nsis.installerIcon, 'build/icon.ico'); assert.equal(pkg.build.nsis.uninstallerIcon, 'build/icon.ico');
+  assert.equal(pkg.build.win.icon, 'build/icon.ico');
+  assert.equal(pkg.build.nsis.installerIcon, 'build/installer.ico'); assert.equal(pkg.build.nsis.uninstallerIcon, 'build/installer.ico');
   const fs = require('fs'), path = require('path');
   const png = fs.readFileSync(path.join(__dirname, '..', 'build', 'icon.png'));
   assert.equal(png.readUInt32BE(0), 0x89504e47, 'a real PNG'); assert.ok(png.readUInt32BE(16) >= 256 && png.readUInt32BE(20) >= 256, 'at least 256 px, as electron-builder requires');

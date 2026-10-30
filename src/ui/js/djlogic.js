@@ -38,9 +38,37 @@ export function genreList(tracks) {
     .sort((a, b) => b.count - a.count || (a.name < b.name ? -1 : 1));
 }
 
-/** the songs the DJ may play: playable ones (not offline), and in "genre" mode only those with one of the chosen genres */
-export function poolFor(tracks, { mode = 'all', genres = [] } = {}) {
+/** the artist names of a song, lower case: its artist and album artist, split at ";" (not at "/" or ",": AC/DC and Tyler, The Creator are one artist each) */
+export function artistKeys(t) {
+  const out = [];
+  for (const field of [t.artist, t.albumArtist]) for (const part of String(field || '').split(';')) { const k = part.trim().toLowerCase(); if (k && !out.includes(k)) out.push(k); }
+  return out;
+}
+
+/** every artist in the library, most songs first: [{key, name, count}] (name = the spelling used most) */
+export function artistList(tracks) {
+  const m = new Map();
+  for (const t of tracks) {
+    if (t.hidden || t.offline) continue;
+    const seen = new Set();
+    for (const field of [t.artist, t.albumArtist]) for (const part of String(field || '').split(';')) {
+      const name = part.trim(), key = name.toLowerCase(); if (!key || seen.has(key)) continue; seen.add(key);
+      const e = m.get(key) || { key, count: 0, spell: new Map() };
+      e.count++; e.spell.set(name, (e.spell.get(name) || 0) + 1); m.set(key, e);
+    }
+  }
+  return Array.from(m.values()).map((e) => ({ key: e.key, count: e.count, name: Array.from(e.spell.entries()).sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1))[0][0] }))
+    .sort((a, b) => b.count - a.count || (a.name < b.name ? -1 : 1));
+}
+
+/** the songs the DJ may play: playable ones (not offline); in "genre" mode only those with one of the chosen genres, in "artist" mode only those by one of the chosen artists */
+export function poolFor(tracks, { mode = 'all', genres = [], artists = [] } = {}) {
   const base = tracks.filter((t) => !t.hidden && !t.offline && t.duration !== 0);
+  if (mode === 'artist') {
+    const want = new Set((artists || []).map((a) => String(a).toLowerCase()));
+    if (!want.size) return [];
+    return base.filter((t) => artistKeys(t).some((a) => want.has(a)));
+  }
   if (mode !== 'genre') return base;
   const want = new Set((genres || []).map((g) => String(g).toLowerCase()));
   if (!want.size) return [];
@@ -110,11 +138,13 @@ export function buildMix({ pool, count = 12, style = 'balanced', plays = () => 0
   return out;
 }
 
-/** "Mix of 2 genres: Ambient, Folk" style text for the panel */
-export function describePool(mode, genres, poolSize) {
-  if (mode !== 'genre') return `Whole library · ${poolSize} song${poolSize === 1 ? '' : 's'}`;
-  if (!genres.length) return 'Pick one or more genres';
-  return `${genres.length === 1 ? genres[0] : genres.length + ' genres'} · ${poolSize} song${poolSize === 1 ? '' : 's'}`;
+/** "2 genres · 120 songs" style text for the panel (mode 'all' | 'genre' | 'artist'; `picked` = the chosen genres or artists) */
+export function describePool(mode, picked, poolSize) {
+  const songs = `${poolSize} song${poolSize === 1 ? '' : 's'}`;
+  if (mode !== 'genre' && mode !== 'artist') return `Whole library · ${songs}`;
+  const noun = mode === 'genre' ? 'genre' : 'artist';
+  if (!picked.length) return `Pick one or more ${noun}s`;
+  return `${picked.length === 1 ? picked[0] : picked.length + ' ' + noun + 's'} · ${songs}`;
 }
 
 /** how many songs must be queued ahead, and when to add more */

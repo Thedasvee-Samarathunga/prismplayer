@@ -1,5 +1,5 @@
-Prism 2.1.0. Apply on top of 2.0.3: unzip over the repo (it contains binary icon files) and commit.
-- Blurred album cover background is back as an option (Settings > Appearance), made once by the server, high quality, also behind the fullscreen lyrics.
-- New icon (build/icon.ico + build/installer.ico + build/icon.png made from your artwork) and a build check that the INSTALLED exe + shortcuts show it.
-- Caching all over: covers, thumbnails, track starts, static files, Last.fm recap. Settings > Cache.
-- Edit metadata (songs or whole albums) and optional automatic album art download (Settings > Album art).
+Prism 2.1.1. Unzip over the repo (it contains binary icon files) and commit.
+- DJ: "Start a new mix" always builds a fresh queue (avoids the songs just queued / playing), makes the DJ Mix list active and plays it. A separate "Stop the mix" button.
+- DJ: new "By artist" source (search, pick several). "Clear all" empties the picked genres / artists.
+- Icons: build/icon.ico and build/installer.ico are now identical plain-bitmap icons (16-256 px, standard sizes only, no PNG-compressed picture). Rebuild with scripts/make-icons.py.
+- Taskbar preview: previous / play-pause / next buttons (Windows), the icon follows play/pause.

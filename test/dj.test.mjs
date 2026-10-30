@@ -129,3 +129,26 @@ test('queue bookkeeping: how many to add and how many played songs to drop; the 
   assert.equal(describePool('all', [], 1), 'Whole library · 1 song'); assert.equal(describePool('all', [], 120), 'Whole library · 120 songs');
   assert.equal(describePool('genre', [], 0), 'Pick one or more genres'); assert.equal(describePool('genre', ['folk'], 18), 'folk · 18 songs'); assert.equal(describePool('genre', ['a', 'b'], 5), '2 genres · 5 songs');
 });
+
+test('artists: artistList counts songs per artist (artist + album artist, split at ";"), poolFor("artist") keeps only the picked ones, none picked = nothing', async () => {
+  const { artistList, poolFor } = await import('../src/ui/js/djlogic.js');
+  const T = [
+    { id: 1, artist: 'AC/DC', albumArtist: 'AC/DC' }, { id: 2, artist: 'AC/DC' }, { id: 3, artist: 'Tyler, The Creator' },
+    { id: 4, artist: 'Duo A; Duo B' }, { id: 5, artist: 'Someone', albumArtist: 'Duo B' }, { id: 6, artist: 'Gone', offline: true }, { id: 7, artist: 'Silent', duration: 0 },
+  ];
+  const l = artistList(T);
+  assert.equal(l[0].name, 'AC/DC'); assert.equal(l[0].count, 2, 'a song counts once even when artist and album artist match');
+  assert.ok(l.some((a) => a.key === 'tyler, the creator'), 'a comma does not split an artist');
+  assert.equal(l.find((a) => a.key === 'duo b').count, 2);
+  assert.ok(!l.some((a) => a.key === 'gone'), 'offline songs are not listed');
+  assert.deepEqual(poolFor(T, { mode: 'artist', artists: ['ac/dc'] }).map((t) => t.id), [1, 2]);
+  assert.deepEqual(poolFor(T, { mode: 'artist', artists: ['DUO B'] }).map((t) => t.id), [4, 5]);
+  assert.equal(poolFor(T, { mode: 'artist', artists: [] }).length, 0);
+  assert.equal(poolFor(T, { mode: 'artist', artists: ['silent'] }).length, 0, 'unplayable songs stay out');
+});
+
+test('describePool for artists', () => {
+  assert.equal(describePool('artist', [], 0), 'Pick one or more artists');
+  assert.equal(describePool('artist', ['Radiohead'], 1), 'Radiohead · 1 song');
+  assert.equal(describePool('artist', ['A', 'B'], 30), '2 artists · 30 songs');
+});

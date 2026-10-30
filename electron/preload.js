@@ -17,6 +17,8 @@ contextBridge.exposeInMainWorld('prismHost', {
   // system-wide hotkeys: [{action, accelerator}] -> {ok: [...], failed: [...]}
   setGlobalHotkeys: (list) => ipcRenderer.invoke('global-hotkeys', list),
   onHotkey: (cb) => ipcRenderer.on('hotkey', (_e, action) => cb(String(action))),
+  // tells the desktop shell what is playing, for the previous / play-pause / next buttons in the taskbar preview
+  setPlaybackState: (st) => ipcRenderer.send('playback-state', { playing: !!(st && st.playing), hasTrack: !!(st && st.hasTrack) }),
   // dropped files / folders -> real file system paths
   pathsFromDrop: (files) => Array.from(files).map((f) => webUtils.getPathForFile(f)).filter(Boolean),
 });

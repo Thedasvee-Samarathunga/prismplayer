@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Builds the Windows icon files from build/icon-1024.png (needs Pillow: pip install pillow).
 
-  build/icon.ico       the program's icon (Prism Player.exe, shortcuts, taskbar). The standard Windows layout: classic 32-bit bitmaps for 16-128 px, PNG for the 256 px picture.
+  build/icon.ico       the program's icon (Prism Player.exe, shortcuts, taskbar). Classic 32-bit bitmaps for every size (16-256 px), no PNG-compressed picture, so any tool (rcedit, NSIS, Explorer) reads it.
   build/installer.ico  for the installer / uninstaller (NSIS): ONLY classic bitmaps (NSIS is picky about PNG-compressed pictures)
   build/icon.png       512 px PNG (the window / taskbar icon inside the app, and the fallback for electron-builder)
   src/ui/icon.png      256 px PNG (the page icon)
@@ -53,10 +53,10 @@ def main():
     big = Image.open(SRC).convert('RGBA')
     if big.width < 256 or big.width != big.height:
         sys.exit('build/icon-1024.png must be a square picture of at least 256 px')
-    sizes = [16, 20, 24, 32, 40, 48, 64, 72, 96, 128, 256]
+    sizes = [16, 24, 32, 48, 64, 128, 256]   # only the standard sizes, every picture a classic bitmap (no PNG-compressed entry anywhere)
     pics = {n: scaled(big, n) for n in sizes}
-    write_ico(os.path.join(ROOT, 'build', 'icon.ico'), [(n, bmp_entry(pics[n]) if n < 256 else png_entry(pics[n])) for n in sizes])
-    write_ico(os.path.join(ROOT, 'build', 'installer.ico'), [(n, bmp_entry(pics[n])) for n in [16, 24, 32, 48, 64, 128, 256]])
+    write_ico(os.path.join(ROOT, 'build', 'icon.ico'), [(n, bmp_entry(pics[n])) for n in sizes])
+    write_ico(os.path.join(ROOT, 'build', 'installer.ico'), [(n, bmp_entry(pics[n])) for n in sizes])
     scaled(big, 512).save(os.path.join(ROOT, 'build', 'icon.png'), optimize=True)
     scaled(big, 256).save(os.path.join(ROOT, 'src', 'ui', 'icon.png'), optimize=True)
     for f in ['build/icon.ico', 'build/installer.ico', 'build/icon.png', 'src/ui/icon.png']:

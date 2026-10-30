@@ -134,7 +134,8 @@ async function createWindow() {
   });
   if (b.max) win.maximize();
   // show the window as soon as it is ready, and in any case after 3 s so it can never stay invisible
-  win.once('ready-to-show', () => win.show());
+  win.once('ready-to-show', () => { win.show(); thumbKey = ''; applyThumbar(lastPlayback); });
+  win.on('show', () => { thumbKey = ''; applyThumbar(lastPlayback); });
   setTimeout(() => { if (win && !win.isDestroyed() && !win.isVisible()) { log('window was not ready after 3 s, showing it anyway'); win.show(); } }, 3000);
   win.on('close', saveBounds);
   win.on('closed', () => { win = null; });
@@ -186,6 +187,55 @@ ipcMain.on('win-control', (_e, action) => {
   } catch (e) { log('window control failed: ' + e.message); }
 });
 ipcMain.handle('win-state', () => ({ maximized: !!(win && !win.isDestroyed() && win.isMaximized()) }));
+// ------------------------------------------------------------------ taskbar preview buttons (Windows): previous / play-pause / next
+// The icons are drawn here from a few shapes (no image files to ship or lose), white with a thin dark edge so they read on a light or a dark preview.
+// A click is sent to the page as the same action the hotkeys use ('prev' / 'playpause' / 'next'), so it behaves exactly like pressing the key.
+function thumbIcon(kind) {
+  const N = 32, SS = 4, bar = (x0, x1) => (x, y) => x >= x0 && x <= x1 && y >= 7 && y <= 25;
+  const tri = (ax, ay, bx, by, cx, cy) => (x, y) => {
+    const d = (px, py, qx, qy) => (x - qx) * (py - qy) - (px - qx) * (y - qy);
+    const d1 = d(ax, ay, bx, by), d2 = d(bx, by, cx, cy), d3 = d(cx, cy, ax, ay);
+    return !((d1 < 0 || d2 < 0 || d3 < 0) && (d1 > 0 || d2 > 0 || d3 > 0));
+  };
+  const shapes = kind === 'play' ? [tri(11, 6, 11, 26, 26, 16)]
+    : kind === 'pause' ? [bar(8.5, 13.5), bar(18.5, 23.5)]
+    : kind === 'prev' ? [bar(6, 9.5), tri(25, 6, 25, 26, 11, 16)]
+    : [bar(22.5, 26), tri(7, 6, 7, 26, 21, 16)];
+  const cov = new Float32Array(N * N);
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+    let c = 0;
+    for (let j = 0; j < SS; j++) for (let i = 0; i < SS; i++) { const px = x + (i + 0.5) / SS, py = y + (j + 0.5) / SS; if (shapes.some((f) => f(px, py))) c++; }
+    cov[y * N + x] = c / (SS * SS);
+  }
+  const buf = Buffer.alloc(N * N * 4);                                   // BGRA, straight alpha
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+    let edge = 0;
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const xx = x + dx, yy = y + dy; if (xx >= 0 && yy >= 0 && xx < N && yy < N) edge = Math.max(edge, cov[yy * N + xx]); }
+    const f = cov[y * N + x], a = Math.max(f, edge * 0.85), o = (y * N + x) * 4;
+    const v = a > 0 ? Math.round(255 * f / a) : 0;                       // white where the shape is, dark in the 1 px edge
+    buf[o] = v; buf[o + 1] = v; buf[o + 2] = v; buf[o + 3] = Math.round(a * 255);
+  }
+  return nativeImage.createFromBitmap(buf, { width: N, height: N });
+}
+let thumbIcons = null, thumbKey = '';
+function applyThumbar(st) {
+  if (process.platform !== 'win32' || !win || win.isDestroyed() || typeof win.setThumbarButtons !== 'function') return;
+  const playing = !!(st && st.playing), has = !!(st && st.hasTrack), key = `${playing}|${has}`;
+  if (key === thumbKey) return;
+  try {
+    if (!thumbIcons) thumbIcons = { prev: thumbIcon('prev'), play: thumbIcon('play'), pause: thumbIcon('pause'), next: thumbIcon('next') };
+    const send = (action) => () => { if (win && !win.isDestroyed()) win.webContents.send('hotkey', action); };
+    const flags = has ? [] : ['disabled'];
+    thumbKey = key;
+    win.setThumbarButtons([
+      { tooltip: 'Previous', icon: thumbIcons.prev, flags, click: send('prev') },
+      { tooltip: playing ? 'Pause' : 'Play', icon: playing ? thumbIcons.pause : thumbIcons.play, flags, click: send('playpause') },
+      { tooltip: 'Next', icon: thumbIcons.next, flags, click: send('next') },
+    ]);
+  } catch (e) { thumbKey = ''; log('taskbar buttons failed: ' + e.message); }
+}
+let lastPlayback = { playing: false, hasTrack: false };
+ipcMain.on('playback-state', (_e, st) => { lastPlayback = { playing: !!(st && st.playing), hasTrack: !!(st && st.hasTrack) }; applyThumbar(lastPlayback); });
 ipcMain.on('show-in-folder', (_e, p) => { if (typeof p === 'string') shell.showItemInFolder(p); });
 ipcMain.on('fullscreen', (_e, on) => { if (win && !win.isDestroyed()) win.setFullScreen(!!on); });
 

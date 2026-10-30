@@ -1,18 +1,18 @@
 // The music DJ (top ribbon, after Recap): builds an endless mix and keeps it going.
-//  * Source: the whole library, or only the genres you pick.   Style: balanced / favourites / discover (uses your Last.fm play counts, else this PC's).
+//  * Source: the whole library, only the genres you pick, or only the artists you pick ("Clear all" empties the picks).   Style: balanced / favourites / discover (uses your Last.fm play counts, else this PC's).
 //  * It fills a playlist called "DJ Mix", keeps ten songs queued ahead, drops the ones that have played, and (with a crossfade above 0) overlaps
 //    the songs with an equal-power fade. The fade itself is done by the server's audio stream while the DJ is on (settings.dj.crossfade).
-//  * Starting it keeps what is playing (when it fits the source) and carries on from there.
+//  * "Start a new mix" always builds a fresh queue (avoiding what was just queued / playing), makes the DJ Mix the active list and starts playing it.
 import { S, on, emit, persist, saveSettings, createPlaylist, setActive, replacePlaylist, addToPlaylist, removeItems } from './state.js';
 import { P, playItem } from './playback.js';
 import { engine } from './player.js';
 import { toast } from './dialogs.js';
 import { lfFor } from './lfstats.js';
 import { escapeHtml, displayArtist } from './fmt.js';
-import { genreList, poolFor, buildMix, describePool, refillCount, trimCount, DJ_AHEAD } from './djlogic.js';
+import { genreList, artistList, poolFor, buildMix, describePool, refillCount, trimCount, DJ_AHEAD } from './djlogic.js';
 
 export const DJ_LIST = 'DJ Mix';
-const DEF = { on: false, mode: 'all', genres: [], style: 'balanced', crossfade: 6 };
+const DEF = { on: false, mode: 'all', genres: [], artists: [], style: 'balanced', crossfade: 6 };
 export const djCfg = () => Object.assign({}, DEF, (S.settings && S.settings.dj) || {});
 export const djOn = () => !!djCfg().on;
 const djList = () => S.playlists.find((p) => p.name === DJ_LIST) || null;
@@ -34,24 +34,30 @@ let busy = false;
 const trackOf = (id) => S.tracks.get(id) || null;
 function mix(count, prev, recentIds) {
   const cfg = djCfg();
-  return buildMix({ pool: poolFor(S.list, cfg), count, style: cfg.style, plays: playsOf, recent: recentIds, prev, seed: seed(), keepGenre: true });
+  return buildMix({ pool: poolFor(S.list, cfg), count, style: cfg.style, plays: playsOf, recent: recentIds, prev, seed: seed(), keepGenre: cfg.mode !== 'artist' });
 }
+const picksOf = (cfg) => (cfg.mode === 'genre' ? cfg.genres : cfg.mode === 'artist' ? cfg.artists : []) || [];
+const emptyMsg = (cfg) => cfg.mode === 'genre' ? (cfg.genres.length ? 'Those genres have fewer than 2 songs. Pick more genres.' : 'Pick at least one genre first.')
+  : cfg.mode === 'artist' ? (cfg.artists.length ? 'Those artists have fewer than 2 songs. Pick more artists.' : 'Pick at least one artist first.') : 'Add some music to the library first.';
 export const poolSize = () => poolFor(S.list, djCfg()).length;
 
+/** Builds a brand-new mix and plays it (the "Start a new mix" button; also what turns the DJ on). Never continues the old queue: it avoids the songs just queued and the one playing. */
 export async function startDj() {
   const cfg = djCfg(), pool = poolFor(S.list, cfg);
-  if (pool.length < 2) { toast(cfg.mode === 'genre' ? (cfg.genres.length ? 'Those genres have fewer than 2 songs. Pick more genres.' : 'Pick at least one genre first.') : 'Add some music to the library first.', { error: true }); return false; }
+  if (pool.length < 2) { toast(emptyMsg(cfg), { error: true }); return false; }
   await saveSettings({ dj: { on: true } });
   if (S.order !== 'default') { S.djOrderBefore = S.order; S.order = 'default'; emit('order'); }
-  const pl = djList() || createPlaylist(DJ_LIST, []);
-  const cur = P.cur && P.state !== 'stopped' ? P.cur.track : null, keep = cur && pool.some((t) => t.id === cur.id) ? cur : null;
-  const ids = (keep ? [keep.id] : []).concat(mix(keep ? DJ_AHEAD + 1 : DJ_AHEAD + 2, keep, keep ? [keep.id] : []));
-  const items = replacePlaylist(pl.id, ids);
+  const old = djList(), pl = old || createPlaylist(DJ_LIST, []);
+  const avoid = (old ? old.items.slice(-40).map((i) => i.id) : []).concat(P.cur ? [P.cur.track.id] : []);
+  lastKey = keyOf(djCfg());
+  busy = true;
+  let items;
+  try { items = replacePlaylist(pl.id, mix(DJ_AHEAD + 2, null, avoid)); } finally { busy = false; }
+  if (!items.length) { toast('Could not pick songs for the mix.', { error: true }); return false; }
   setActive(pl.id);
-  if (keep) playItem(pl.id, items[0].u, { startAt: engine.position, autoplay: P.state === 'playing' });
-  else playItem(pl.id, items[0].u);
+  await playItem(pl.id, items[0].u);
   persist(); paintBadge(); renderPanel();
-  toast(`DJ mix started: ${describePool(cfg.mode, cfg.genres, pool.length)}`, { ms: 3200 });
+  toast(`New DJ mix: ${describePool(cfg.mode, picksOf(cfg), pool.length)}`, { ms: 3000 });
   return true;
 }
 
@@ -82,7 +88,8 @@ function topUp() {
 /** throws away what is queued after the current song and picks new songs (after a change of source / style) */
 export function remix() {
   const pl = djList();
-  if (!pl || !djOn()) return;
+  if (!djOn()) return;
+  if (!pl) { startDj(); return; }
   const cur = P.cur && P.cur.pid === pl.id ? pl.items.findIndex((i) => i.u === P.cur.u) : -1;
   const keep = cur >= 0 ? pl.items.slice(0, cur + 1) : [];
   const drop = new Set(pl.items.slice(keep.length).map((i) => i.u));
@@ -91,14 +98,14 @@ export function remix() {
     if (drop.size) removeItems(pl.id, drop);
     const last = keep.length ? trackOf(keep[keep.length - 1].id) : null;
     addToPlaylist(pl.id, mix(DJ_AHEAD + 2, last, keep.slice(-40).map((i) => i.id)));
-    if (cur < 0 && pl.items.length) playItem(pl.id, pl.items[0].u);
+    if (cur < 0 && pl.items.length) { setActive(pl.id); playItem(pl.id, pl.items[0].u); }
   } finally { busy = false; }
   renderPanel();
 }
 
 // ------------------------------------------------------------------------------------ the panel
 let panel = null, open = false, filter = '', lastKey = '';
-const keyOf = (c) => JSON.stringify([c.mode, c.genres.slice().sort(), c.style]);
+const keyOf = (c) => JSON.stringify([c.mode, c.genres.slice().sort(), c.artists.slice().sort(), c.style]);
 const STYLES = [['balanced', 'Balanced', 'Everything is equally likely.'], ['favourites', 'Favourites', 'Songs you play a lot come up more often.'], ['discover', 'Discover', 'Songs you rarely or never play come up more often.']];
 
 function upNext() {
@@ -110,21 +117,28 @@ function upNext() {
 
 function renderPanel() {
   if (!panel || !open) return;
-  const cfg = djCfg(), genres = genreList(S.list), sel = new Set(cfg.genres.map((g) => g.toLowerCase()));
-  const shown = genres.filter((g) => !filter || g.name.toLowerCase().includes(filter.toLowerCase())).slice(0, 60);
+  const cfg = djCfg(), picks = picksOf(cfg), sel = new Set(picks.map((g) => g.toLowerCase()));
+  const items = cfg.mode === 'genre' ? genreList(S.list) : cfg.mode === 'artist' ? artistList(S.list) : [];
+  const field = cfg.mode === 'artist' ? 'artists' : 'genres', noun = cfg.mode === 'artist' ? 'artist' : 'genre';
+  const q0 = filter.toLowerCase(), chosen = items.filter((g) => sel.has(g.key));
+  const shown = chosen.concat(items.filter((g) => !sel.has(g.key) && (!q0 || g.name.toLowerCase().includes(q0)))).slice(0, 60 + chosen.length);
+  const names = picks.map((k) => { const f = items.find((g) => g.key === k.toLowerCase()); return f ? f.name : k; });
   const size = poolFor(S.list, cfg).length, next = upNext();
   const keepFocus = document.activeElement && panel.contains(document.activeElement) ? document.activeElement.id : '';
   panel.innerHTML = `
     <div class="dj-head"><b>Music DJ</b><span class="dj-state">${cfg.on ? '<i></i>Mixing' : 'Off'}</span><button class="icon-btn tiny" id="dj-close" type="button" aria-label="Close">×</button></div>
-    <button class="btn ${cfg.on ? '' : 'primary'} dj-main" id="dj-toggle" type="button">${cfg.on ? 'Stop the mix' : 'Start the mix'}</button>
+    <button class="btn primary dj-main" id="dj-new" type="button">${cfg.on ? 'Start a new mix' : 'Start the mix'}</button>
+    ${cfg.on ? '<button class="btn dj-main dj-stop" id="dj-toggle" type="button">Stop the mix</button>' : ''}
     <div class="dj-sec"><span class="lab">What to mix</span>
       <div class="dj-seg" role="radiogroup" aria-label="Source">
-        <button type="button" role="radio" aria-checked="${cfg.mode !== 'genre'}" data-mode="all" class="${cfg.mode !== 'genre' ? 'on' : ''}">Whole library</button>
+        <button type="button" role="radio" aria-checked="${cfg.mode !== 'genre' && cfg.mode !== 'artist'}" data-mode="all" class="${cfg.mode !== 'genre' && cfg.mode !== 'artist' ? 'on' : ''}">Whole library</button>
         <button type="button" role="radio" aria-checked="${cfg.mode === 'genre'}" data-mode="genre" class="${cfg.mode === 'genre' ? 'on' : ''}">By genre</button>
+        <button type="button" role="radio" aria-checked="${cfg.mode === 'artist'}" data-mode="artist" class="${cfg.mode === 'artist' ? 'on' : ''}">By artist</button>
       </div>
-      ${cfg.mode === 'genre' ? `<input id="dj-filter" type="text" placeholder="Find a genre…" value="${escapeHtml(filter)}" spellcheck="false" autocomplete="off" aria-label="Find a genre">
-      <div class="dj-chips" role="group" aria-label="Genres">${shown.length ? shown.map((g) => `<button type="button" class="dj-chip ${sel.has(g.key) ? 'on' : ''}" aria-pressed="${sel.has(g.key)}" data-g="${escapeHtml(g.key)}">${escapeHtml(g.name)} <em>${g.count}</em></button>`).join('') : '<span class="dj-none">No genre tags found in your library.</span>'}</div>` : ''}
-      <div class="dj-pool" id="dj-pool">${escapeHtml(describePool(cfg.mode, cfg.genres, size))}</div>
+      ${items.length || cfg.mode !== 'all' ? `<div class="dj-pickrow"><input id="dj-filter" type="text" placeholder="Find ${noun === 'artist' ? 'an artist' : 'a genre'}…" value="${escapeHtml(filter)}" spellcheck="false" autocomplete="off" aria-label="Find ${noun === 'artist' ? 'an artist' : 'a genre'}">
+      <button class="btn dj-clear" id="dj-clear" type="button" ${picks.length ? '' : 'disabled'}>Clear all${picks.length ? ' (' + picks.length + ')' : ''}</button></div>
+      <div class="dj-chips" role="group" aria-label="${noun === 'artist' ? 'Artists' : 'Genres'}">${shown.length ? shown.map((g) => `<button type="button" class="dj-chip ${sel.has(g.key) ? 'on' : ''}" aria-pressed="${sel.has(g.key)}" data-pick="${escapeHtml(g.key)}">${escapeHtml(g.name)} <em>${g.count}</em></button>`).join('') : `<span class="dj-none">${filter ? 'Nothing matches.' : 'No ' + noun + ' tags found in your library.'}</span>`}</div>` : ''}
+      <div class="dj-pool" id="dj-pool">${escapeHtml(describePool(cfg.mode, names, size))}</div>
     </div>
     <div class="dj-sec"><span class="lab">Style</span>
       <div class="dj-seg" role="radiogroup" aria-label="Style">${STYLES.map(([id, l, tip]) => `<button type="button" role="radio" aria-checked="${cfg.style === id}" data-style="${id}" title="${escapeHtml(tip)}" class="${cfg.style === id ? 'on' : ''}">${l}</button>`).join('')}</div>
@@ -140,11 +154,17 @@ function renderPanel() {
     </div>`;
   const q = (s) => panel.querySelector(s);
   q('#dj-close').addEventListener('click', closeDjPanel);
-  q('#dj-toggle').addEventListener('click', () => (djOn() ? stopDj() : startDj()));
-  q('#dj-remix').addEventListener('click', () => { remix(); toast('New songs queued.', { ms: 1800 }); });
-  panel.querySelectorAll('[data-mode]').forEach((b) => b.addEventListener('click', () => change({ mode: b.dataset.mode })));
+  q('#dj-new').addEventListener('click', () => { startDj(); });
+  const tg = q('#dj-toggle'); if (tg) tg.addEventListener('click', () => stopDj());
+  q('#dj-remix').addEventListener('click', () => { if (poolSize() < 2) { toast(emptyMsg(djCfg()), { error: true }); return; } remix(); toast('New songs queued.', { ms: 1800 }); });
+  panel.querySelectorAll('[data-mode]').forEach((b) => b.addEventListener('click', () => { filter = ''; change({ mode: b.dataset.mode }); }));
   panel.querySelectorAll('[data-style]').forEach((b) => b.addEventListener('click', () => change({ style: b.dataset.style })));
-  panel.querySelectorAll('[data-g]').forEach((b) => b.addEventListener('click', () => { const g = new Set(djCfg().genres.map((x) => x.toLowerCase())); if (g.has(b.dataset.g)) g.delete(b.dataset.g); else g.add(b.dataset.g); change({ genres: Array.from(g) }); }));
+  panel.querySelectorAll('[data-pick]').forEach((b) => b.addEventListener('click', () => { const g = new Set(picksOf(djCfg()).map((x) => x.toLowerCase())); if (g.has(b.dataset.pick)) g.delete(b.dataset.pick); else g.add(b.dataset.pick); change({ [field]: Array.from(g) }); }));
+  const cl = q('#dj-clear');
+  if (cl) cl.addEventListener('click', async () => {
+    await saveSettings({ dj: { [field]: [] } }); lastKey = keyOf(djCfg()); filter = ''; renderPanel();
+    toast(`All ${noun}s cleared.${djOn() ? ' The queue keeps playing as it is.' : ''}`, { ms: 2000 });
+  });
   const f = q('#dj-filter'); if (f) f.addEventListener('input', () => { filter = f.value; renderPanel(); const nf = panel.querySelector('#dj-filter'); if (nf) { nf.focus(); nf.setSelectionRange(filter.length, filter.length); } });
   const fade = q('#dj-fade');
   fade.addEventListener('input', () => { const v = Number(fade.value); q('#dj-fade-v').textContent = v > 0 ? v + ' s crossfade' : 'off (gapless)'; });
@@ -154,7 +174,7 @@ function renderPanel() {
 
 async function change(patch) {
   await saveSettings({ dj: patch });
-  if (djOn() && keyOf(djCfg()) !== lastKey) { lastKey = keyOf(djCfg()); if (poolSize() >= 2) remix(); else toast('Not enough songs in that selection. The queue is unchanged.', { error: true }); }
+  if (djOn() && keyOf(djCfg()) !== lastKey) { lastKey = keyOf(djCfg()); if (poolSize() >= 2) remix(); else toast(emptyMsg(djCfg()).replace(/ first\.$/, '.') + ' The queue is unchanged.', { error: true }); }
   renderPanel();
 }
 
@@ -171,7 +191,7 @@ export function openDjPanel() {
   panel.style.left = Math.max(8, Math.min(r.left, window.innerWidth - 400)) + 'px'; panel.style.top = (r.bottom + 6) + 'px';
   lastKey = keyOf(djCfg());
   renderPanel();
-  const first = panel.querySelector('#dj-toggle'); if (first) first.focus();
+  const first = panel.querySelector('#dj-new'); if (first) first.focus();
 }
 export function closeDjPanel() { if (!panel) return; open = false; panel.hidden = true; }
 export const toggleDjPanel = () => (open ? closeDjPanel() : openDjPanel());
